@@ -91,7 +91,10 @@ export async function upsertEntries(entries: LedgerEntry[]) {
 
 export async function deleteAllEntries() {
   const supabase = getSupabaseClient();
-  const { error } = await supabase.from('entries').delete().neq('id', '');
+  const { error } = await supabase
+    .from('entries')
+    .delete()
+    .not('id', 'is', null);
 
   if (error) {
     throw error;
