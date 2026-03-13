@@ -38,6 +38,16 @@ import {
   CalendarDays
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import {
+  createArchive,
+  deleteAllEntries,
+  deleteEntryById,
+  listArchives,
+  listEntries,
+  listSettings,
+  setSetting,
+  upsertEntries,
+} from './lib/storage';
 
 interface Entry {
   id: string;
@@ -122,20 +132,12 @@ export default function App() {
 
   const fetchEntries = async () => {
     try {
-      const res = await fetch('/api/entries');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.length > 0) {
-          setAllEntries(data);
-        } else {
-          setAllEntries(INITIAL_ENTRIES);
-          // Save initial entries to DB
-          await fetch('/api/entries', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(INITIAL_ENTRIES)
-          });
-        }
+      const data = await listEntries();
+      if (data.length > 0) {
+        setAllEntries(data);
+      } else {
+        setAllEntries(INITIAL_ENTRIES);
+        await upsertEntries(INITIAL_ENTRIES);
       }
     } catch (err) {
       console.error("Failed to fetch entries", err);
@@ -158,10 +160,9 @@ export default function App() {
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch('/api/settings');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.openingBalance) setOpeningBalance(parseFloat(data.openingBalance));
+      const data = await listSettings();
+      if (data.openingBalance !== undefined) {
+        setOpeningBalance(parseFloat(data.openingBalance) || 0);
       }
     } catch (err) {
       console.error("Failed to fetch settings", err);
@@ -170,11 +171,8 @@ export default function App() {
 
   const fetchArchives = async () => {
     try {
-      const res = await fetch('/api/archives');
-      if (res.ok) {
-        const data = await res.json();
-        setArchives(data);
-      }
+      const data = await listArchives();
+      setArchives(data);
     } catch (err) {
       console.error("Failed to fetch archives", err);
     }
@@ -219,11 +217,7 @@ export default function App() {
 
   const saveEntries = async (entriesToSave: Entry[]) => {
     try {
-      await fetch('/api/entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entriesToSave)
-      });
+      await upsertEntries(entriesToSave);
     } catch (err) {
       console.error("Failed to save entries", err);
     }
@@ -231,11 +225,7 @@ export default function App() {
 
   const saveOpeningBalance = async (val: number) => {
     try {
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'openingBalance', value: val.toString() })
-      });
+      await setSetting('openingBalance', val.toString());
     } catch (err) {
       console.error("Failed to save opening balance", err);
     }
@@ -246,13 +236,7 @@ export default function App() {
     setIsSaving(true);
     try {
       // 1. Save all entries to ensure everything is up to date
-      const entriesRes = await fetch('/api/entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(allEntries)
-      });
-      
-      if (!entriesRes.ok) throw new Error('Failed to save entries');
+      await upsertEntries(allEntries);
 
       // 2. Create a snapshot for the archive
       let currentPeriod;
@@ -277,17 +261,11 @@ export default function App() {
           displayLabel: currentPeriod.displayLabel
         };
 
-        const archiveRes = await fetch('/api/archives', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: Math.random().toString(36).substr(2, 9),
-            name: currentPeriod.displayLabel,
-            data: archiveData
-          })
+        await createArchive({
+          id: Math.random().toString(36).substr(2, 9),
+          name: currentPeriod.displayLabel,
+          data: archiveData,
         });
-
-        if (!archiveRes.ok) throw new Error('Failed to save archive snapshot');
       }
       
       // 3. Refresh archives
@@ -316,10 +294,8 @@ export default function App() {
     setIsCreatingNew(true);
     
     try {
-      // 1. Clear entries on server
-      console.log("Calling DELETE /api/entries");
-      const delRes = await fetch('/api/entries', { method: 'DELETE' });
-      if (!delRes.ok) throw new Error('Failed to clear entries on server');
+      // 1. Clear entries in Supabase
+      await deleteAllEntries();
       
       // 2. Generate new entries
       console.log("Generating new entries");
@@ -616,7 +592,7 @@ export default function App() {
         setCurrentPeriodDates(prev => prev.filter(d => d !== entryToDelete.date));
         
         try {
-          await fetch(`/api/entries/${id}`, { method: 'DELETE' });
+          await deleteEntryById(id);
         } catch (err) {
           console.error("Failed to delete entry", err);
         }
