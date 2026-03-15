@@ -35,7 +35,8 @@ import {
   ChevronLast,
   LayoutDashboard,
   Clock,
-  CalendarDays
+  CalendarDays,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -48,6 +49,8 @@ import {
   setSetting,
   upsertEntries,
 } from './lib/storage';
+import { useAuth } from './auth/AuthContext';
+import LoginPage from './components/LoginPage';
 
 interface Entry {
   id: string;
@@ -108,6 +111,7 @@ const getPeriodForDate = (date: Date) => {
 };
 
 export default function App() {
+  const { user, loading: authLoading, signOut } = useAuth();
   const [allEntries, setAllEntries] = useState<Entry[]>([]);
   const [openingBalance, setOpeningBalance] = useState<number>(0);
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null); // null means current
@@ -179,20 +183,22 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (!user) return;
     fetchEntries();
     fetchSettings();
     fetchArchives();
-  }, []);
+  }, [user]);
 
   // Refresh data when navigating between views to ensure latest state
   useEffect(() => {
+    if (!user) return;
     if (view === 'ledger') {
       fetchEntries();
       fetchSettings();
     } else if (view === 'archive-list') {
       fetchArchives();
     }
-  }, [view]);
+  }, [view, user]);
 
   // Initialize currentPeriodDates when selectedPeriod changes or on first load
   useEffect(() => {
@@ -729,7 +735,7 @@ export default function App() {
 
     return (
       <div 
-        className={`relative flex items-center bg-white border border-slate-200 rounded-xl px-3 gap-3 focus-within:ring-2 focus-within:ring-emerald-500 transition-all whitespace-nowrap cursor-pointer ${className}`}
+        className={`relative flex items-center bg-white border border-slate-200 rounded-xl px-3 gap-3 focus-within:ring-2 focus-within:ring-emerald-500 transition-all whitespace-nowrap cursor-pointer print:border-none print:bg-transparent print:px-0 print:gap-0 print:rounded-none print:focus-within:ring-0 ${className}`}
         onClick={(e) => {
           if (e.target === e.currentTarget) {
             openPicker();
@@ -743,9 +749,9 @@ export default function App() {
           onBlur={handleBlur}
           placeholder={placeholder}
           dir="ltr"
-          className="w-full bg-transparent border-none focus:ring-0 text-slate-800 font-bold text-sm text-center py-2 outline-none whitespace-nowrap"
+          className="w-full bg-transparent border-none focus:ring-0 text-slate-800 font-bold text-sm text-center py-2 outline-none whitespace-nowrap print:text-[11px] print:py-0"
         />
-        <div className="relative flex-shrink-0">
+        <div className="relative flex-shrink-0 print:hidden">
           <button 
             type="button"
             onClick={openPicker}
@@ -785,8 +791,34 @@ export default function App() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      setSelectedPeriod(null);
+      setViewingArchive(null);
+      setView('ledger');
+      setNotification(null);
+    } catch (err) {
+      console.error('Failed to logout', err);
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center" dir="rtl">
+        <div className="bg-white rounded-2xl border border-slate-200 px-6 py-5 shadow-lg font-bold text-slate-700">
+          جاري التحقق من الجلسة...
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
+
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-slate-900 font-sans flex" dir="rtl">
+    <div className="app-root min-h-screen bg-[#F8F9FA] text-slate-900 font-sans flex" dir="rtl">
       {/* Notifications */}
       <AnimatePresence>
         {notification && (
@@ -883,6 +915,14 @@ export default function App() {
             }`}>
               {(viewingArchive ? viewingArchive.totals.finalBalance : (entriesWithBalance.length > 0 ? entriesWithBalance[entriesWithBalance.length - 1].balance : openingBalance)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </div>
+
+            <button
+              onClick={handleLogout}
+              className="mt-2 w-full flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-xl hover:bg-slate-50 transition-colors shadow-sm font-bold text-sm"
+            >
+              <LogOut size={16} />
+              تسجيل الخروج
+            </button>
           </div>
         </div>
       </aside>
@@ -1189,6 +1229,20 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-3">
+                  {!viewingArchive && !selectedPeriod && (
+                    <button
+                      onClick={handleCreateNewPeriod}
+                      disabled={isCreatingNew}
+                      className={`flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm font-bold text-sm ${isCreatingNew ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {isCreatingNew ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      ) : (
+                        <Plus size={16} />
+                      )}
+                      {isCreatingNew ? 'جاري الإنشاء...' : 'إنشاء فترة جديدة'}
+                    </button>
+                  )}
                   <button 
                     onClick={handlePrint}
                     className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-xl hover:bg-slate-50 transition-colors shadow-sm text-slate-700 font-bold text-sm"
@@ -1306,7 +1360,7 @@ export default function App() {
                             {!viewingArchive && (
                               <button 
                                 onClick={() => deleteEntry(entry.id)}
-                                className="opacity-0 group-hover/date:opacity-100 p-1.5 text-rose-400 hover:text-rose-600 transition-all hover:bg-rose-50 rounded-md"
+                                className="opacity-0 group-hover/date:opacity-100 p-1.5 text-rose-400 hover:text-rose-600 transition-all hover:bg-rose-50 rounded-md print:hidden"
                                 title="حذف اليوم"
                               >
                                 <Trash2 size={16} />
@@ -1503,34 +1557,73 @@ export default function App() {
     )}
   </div>
 
-      {/* Footer / Signature Section for Print */}
-      <footer className="max-w-7xl mx-auto mt-12 hidden print:grid grid-cols-3 gap-8 text-center border-t border-slate-200 pt-8">
-        <div>
-          <p className="font-bold text-slate-800 mb-8">توقيع المحاسب</p>
-          <div className="border-b border-slate-400 w-32 mx-auto"></div>
-        </div>
-        <div>
-          <p className="font-bold text-slate-800 mb-8">توقيع مدير المحطة</p>
-          <div className="border-b border-slate-400 w-32 mx-auto"></div>
-        </div>
-        <div>
-          <p className="font-bold text-slate-800 mb-8">ختم المؤسسة</p>
-          <div className="border-b border-slate-400 w-32 mx-auto"></div>
-        </div>
-      </footer>
-
       {/* Global CSS for Print */}
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
-          body { background: white !important; padding: 0 !important; }
-          aside { display: none !important; }
-          header { display: none !important; }
-          .flex-1 { width: 100% !important; margin: 0 !important; padding: 0 !important; }
-          input { border: none !important; outline: none !important; }
+          @page { size: A4 portrait; margin: 12mm; }
+
+          body {
+            background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          /* Hide non-essential layout blocks in print */
+          .app-root > * {
+            display: none !important;
+          }
+
+          /* Keep only main content area */
+          .app-root > .flex-1 {
+            display: block !important;
+            width: 100% !important;
+            min-height: auto !important;
+            overflow: visible !important;
+          }
+
+          /* Print only accounting period table + summary */
+          #ledger-table,
+          #summary-section {
+            display: block !important;
+          }
+
+          #ledger-table {
+            margin-bottom: 10mm !important;
+            border-radius: 0 !important;
+          }
+
+          #ledger-table table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            table-layout: auto !important;
+            font-size: 11px !important;
+          }
+
+          #ledger-table thead {
+            display: table-header-group;
+          }
+
+          #ledger-table tfoot {
+            display: table-footer-group;
+          }
+
+          #ledger-table tr,
+          #summary-section .bg-white {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+
+          input {
+            border: none !important;
+            outline: none !important;
+            background: transparent !important;
+            color: #111827 !important;
+          }
+
           input::-webkit-outer-spin-button,
           input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
           .no-print { display: none !important; }
-          @page { margin: 1cm; }
         }
       `}} />
     </div>

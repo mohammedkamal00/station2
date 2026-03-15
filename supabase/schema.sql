@@ -25,22 +25,25 @@ alter table public.settings enable row level security;
 alter table public.archives enable row level security;
 
 drop policy if exists "entries_public_access" on public.entries;
-create policy "entries_public_access"
+drop policy if exists "entries_auth_access" on public.entries;
+create policy "entries_auth_access"
 on public.entries
 for all
-using (true)
-with check (true);
+using (auth.role() = 'authenticated')
+with check (auth.role() = 'authenticated');
 
 drop policy if exists "settings_public_access" on public.settings;
-create policy "settings_public_access"
+drop policy if exists "settings_auth_access" on public.settings;
+create policy "settings_auth_access"
 on public.settings
 for all
-using (true)
-with check (true);
+using (auth.role() = 'authenticated')
+with check (auth.role() = 'authenticated');
 
 drop policy if exists "archives_public_access" on public.archives;
-create policy "archives_public_access"
+drop policy if exists "archives_auth_access" on public.archives;
+create policy "archives_auth_access"
 on public.archives
 for all
-using (true)
-with check (true);
+using (auth.role() = 'authenticated')
+with check (auth.role() = 'authenticated');

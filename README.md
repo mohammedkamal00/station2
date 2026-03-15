@@ -21,7 +21,11 @@ View your app in AI Studio: https://ai.studio/apps/2c910a8c-b8a8-43d5-8e94-0cc9a
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
 5. Optional: set the `GEMINI_API_KEY` in [.env.local](.env.local) if you use Gemini features.
-6. Run the app:
+6. Configure authentication for one owner account in Supabase:
+   - Go to **Authentication → Providers → Email** and keep Email provider enabled.
+   - Go to **Authentication → Settings** and disable public signups.
+   - In **Authentication → Users**, create exactly one user (the owner email/password).
+7. Run the app:
    `npm run dev`
 
 ## Data storage
