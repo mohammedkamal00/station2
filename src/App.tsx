@@ -843,7 +843,7 @@ export default function App() {
             <div className="bg-emerald-600 p-2 rounded-lg text-white">
               <Calculator size={24} />
             </div>
-            دفتر الصندوق
+            دفتر حسابات المحطة
           </h1>
         </div>
 
