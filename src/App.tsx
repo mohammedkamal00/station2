@@ -36,7 +36,8 @@ import {
   LayoutDashboard,
   Clock,
   CalendarDays,
-  LogOut
+  LogOut,
+  Menu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -133,6 +134,18 @@ export default function App() {
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [archives, setArchives] = useState<any[]>([]);
   const [viewingArchive, setViewingArchive] = useState<any | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const fetchEntries = async () => {
     try {
@@ -818,7 +831,22 @@ export default function App() {
   }
 
   return (
-    <div className="app-root min-h-screen bg-[#F8F9FA] text-slate-900 font-sans flex" dir="rtl">
+    <div className="app-root min-h-screen bg-[#F8F9FA] text-slate-900 font-sans flex flex-col lg:flex-row" dir="rtl">
+      <button
+        onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+        className="lg:hidden fixed top-3 right-3 z-[80] bg-white border border-slate-200 text-slate-700 p-2.5 rounded-xl shadow-md print:hidden"
+        aria-label="فتح القائمة"
+      >
+        {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+      </button>
+
+      {isMobileMenuOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-slate-900/40 z-40 print:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
       {/* Notifications */}
       <AnimatePresence>
         {notification && (
@@ -837,7 +865,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Sidebar */}
-      <aside className="w-80 bg-white border-l border-slate-200 flex flex-col h-screen sticky top-0 print:hidden shadow-lg z-30">
+      <aside className={`fixed inset-y-0 right-0 z-50 w-[88vw] max-w-xs bg-white border-l border-slate-200 flex flex-col h-screen print:hidden shadow-lg transform transition-transform duration-300 lg:static lg:w-80 lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         <div className="p-6 border-b border-slate-100">
           <h1 className="text-xl font-black text-slate-800 flex items-center gap-3">
             <div className="bg-emerald-600 p-2 rounded-lg text-white">
@@ -860,6 +888,7 @@ export default function App() {
                   setSelectedPeriod(null);
                   setViewingArchive(null);
                   setView('ledger');
+                  setIsMobileMenuOpen(false);
                   scrollToLedger();
                 }}
                 className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${(!selectedPeriod && !viewingArchive && view === 'ledger') ? 'bg-emerald-50 text-emerald-700 border border-emerald-100 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
@@ -870,7 +899,10 @@ export default function App() {
                 </div>
               </button>
               <button 
-                onClick={scrollToSummary}
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  scrollToSummary();
+                }}
                 className="w-full flex items-center justify-between p-3 rounded-xl transition-all text-slate-600 hover:bg-slate-50"
               >
                 <div className="flex items-center gap-3">
@@ -893,6 +925,7 @@ export default function App() {
                     setView('archive-list');
                     setViewingArchive(null);
                     setSelectedPeriod(null);
+                    setIsMobileMenuOpen(false);
                   }}
                   className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${view === 'archive-list' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
                 >
@@ -928,14 +961,14 @@ export default function App() {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 min-h-screen overflow-y-auto">
+      <div className="flex-1 min-h-screen overflow-y-auto w-full">
         {view === 'archive-list' ? (
-          <div className="p-8 max-w-7xl mx-auto">
+          <div className="p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
             {/* Header Section */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
               <div>
-                <h2 className="text-4xl font-black text-slate-800 flex items-center gap-3">
-                  <Archive size={36} className="text-emerald-600" />
+                <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-800 flex items-center gap-3">
+                  <Archive size={28} className="text-emerald-600 sm:w-9 sm:h-9" />
                   الأرشيف
                 </h2>
                 <p className="text-slate-500 font-bold mt-2">عرض وتنظيم الفترات المحاسبية السابقة</p>
@@ -943,7 +976,7 @@ export default function App() {
               <button 
                 onClick={handleCreateNewPeriod}
                 disabled={isCreatingNew}
-                className={`bg-emerald-600 text-white px-6 py-3 rounded-xl font-black hover:bg-emerald-700 transition-all shadow-lg flex items-center gap-2 ${isCreatingNew ? 'opacity-50 cursor-not-allowed' : ''}`}
+                className={`w-full sm:w-auto justify-center bg-emerald-600 text-white px-5 py-3 rounded-xl font-black hover:bg-emerald-700 transition-all shadow-lg flex items-center gap-2 ${isCreatingNew ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 {isCreatingNew ? (
                   <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
@@ -955,8 +988,8 @@ export default function App() {
             </div>
 
             {/* Statistics Section */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-8">
+              <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                 <div className="bg-blue-50 p-3 rounded-xl text-blue-600">
                   <Archive size={24} />
                 </div>
@@ -965,7 +998,7 @@ export default function App() {
                   <p className="text-2xl font-black text-slate-800">{archiveStats.totalPeriods}</p>
                 </div>
               </div>
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                 <div className="bg-rose-50 p-3 rounded-xl text-rose-600">
                   <Calculator size={24} />
                 </div>
@@ -977,8 +1010,8 @@ export default function App() {
             </div>
 
             {/* Search & Filter Bar */}
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-center gap-4">
-              <div className="flex-1 min-w-[200px] relative">
+            <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-center gap-3 sm:gap-4">
+              <div className="flex-1 min-w-[160px] relative w-full sm:w-auto">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                 <input 
                   type="text"
@@ -988,20 +1021,20 @@ export default function App() {
                   className="w-full pr-10 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-sm"
                 />
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 <span className="text-xs font-bold text-slate-400">من:</span>
                 <CustomDateInput 
                   value={archiveFromDate}
                   onChange={setArchiveFromDate}
-                  className="bg-slate-50 w-48"
+                  className="bg-slate-50 w-full sm:w-48"
                 />
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 <span className="text-xs font-bold text-slate-400">إلى:</span>
                 <CustomDateInput 
                   value={archiveToDate}
                   onChange={setArchiveToDate}
-                  className="bg-slate-50 w-48"
+                  className="bg-slate-50 w-full sm:w-48"
                 />
               </div>
               <button 
@@ -1024,7 +1057,7 @@ export default function App() {
             {/* Table Section */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-right border-collapse">
+                <table className="w-full min-w-[720px] text-right border-collapse">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200">
                       <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider">#</th>
@@ -1107,8 +1140,8 @@ export default function App() {
               </div>
 
               {/* Pagination Section */}
-              <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
+              <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                   <span className="text-xs font-bold text-slate-400">عرض:</span>
                   <select 
                     value={archiveRowsPerPage}
@@ -1185,9 +1218,9 @@ export default function App() {
         ) : (
           <>
             {/* Header */}
-            <header className="bg-white border-b border-slate-200 p-6 sticky top-0 z-20 print:hidden">
-              <div className="max-w-6xl mx-auto flex items-center justify-between">
-                <div className="flex items-center gap-4">
+            <header className="bg-white border-b border-slate-200 p-3 sm:p-4 md:p-6 sticky top-0 z-20 print:hidden">
+              <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                <div className="flex items-start sm:items-center gap-3 sm:gap-4 w-full sm:w-auto">
                   {(selectedPeriod || viewingArchive) && (
                     <button 
                       onClick={() => {
@@ -1201,7 +1234,7 @@ export default function App() {
                     </button>
                   )}
                   <div>
-                    <h2 className="text-2xl font-black text-slate-800">
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-800">
                       {viewingArchive ? `أرشيف: ${viewingArchive.displayLabel}` : (selectedPeriod ? 'سجلات الأرشيف' : 'الفترة الحالية')}
                     </h2>
                     {viewingArchive ? (
@@ -1228,12 +1261,12 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col sm:flex-row w-full sm:w-auto items-stretch sm:items-center gap-2 sm:gap-3">
                   {!viewingArchive && !selectedPeriod && (
                     <button
                       onClick={handleCreateNewPeriod}
                       disabled={isCreatingNew}
-                      className={`flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm font-bold text-sm ${isCreatingNew ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`w-full sm:w-auto justify-center flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm font-bold text-sm ${isCreatingNew ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       {isCreatingNew ? (
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
@@ -1245,7 +1278,7 @@ export default function App() {
                   )}
                   <button 
                     onClick={handlePrint}
-                    className="flex items-center gap-2 bg-white border border-slate-200 px-4 py-2 rounded-xl hover:bg-slate-50 transition-colors shadow-sm text-slate-700 font-bold text-sm"
+                    className="w-full sm:w-auto justify-center flex items-center gap-2 bg-white border border-slate-200 px-4 py-2.5 rounded-xl hover:bg-slate-50 transition-colors shadow-sm text-slate-700 font-bold text-sm"
                   >
                     <Printer size={18} />
                     طباعة الكشف
@@ -1254,12 +1287,12 @@ export default function App() {
               </div>
             </header>
 
-            <div className="p-8 max-w-6xl mx-auto">
+            <div className="p-3 sm:p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
               {selectedPeriod && (
                 <motion.div 
                   initial={{ opacity: 0, y: -20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 mb-8 flex items-center justify-between print:hidden"
+                  className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 sm:p-4 mb-6 sm:mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 print:hidden"
                 >
                   <div className="flex items-center gap-3 text-emerald-800">
                     <div className="bg-emerald-600 p-2 rounded-lg text-white">
@@ -1274,16 +1307,16 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  <div className="flex gap-3">
+                  <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">
                     <button 
                       onClick={() => setView('archive-list')}
-                      className="bg-white text-slate-700 px-4 py-2 rounded-xl font-bold text-sm border border-slate-200 hover:bg-slate-50 transition-colors shadow-sm"
+                      className="w-full sm:w-auto bg-white text-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm border border-slate-200 hover:bg-slate-50 transition-colors shadow-sm"
                     >
                       رجوع للأرشيف
                     </button>
                     <button 
                       onClick={() => setSelectedPeriod(null)}
-                      className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors shadow-sm"
+                      className="w-full sm:w-auto bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors shadow-sm"
                     >
                       رجوع للفترة الحالية
                     </button>
@@ -1295,7 +1328,7 @@ export default function App() {
           {/* Main Ledger Table */}
           <div id="ledger-table" className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden mb-8 print:shadow-none print:border-slate-300">
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-right">
+              <table className="w-full min-w-[860px] border-collapse text-right">
                 <thead>
                   <tr className="bg-slate-100 border-b border-slate-300">
                     <th className="p-3 text-slate-800 font-black border-l border-slate-300 bg-slate-200 text-center text-lg w-[26%]">
@@ -1467,10 +1500,10 @@ export default function App() {
 
             {/* Add Day & Save Buttons */}
             {!viewingArchive && (
-              <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex flex-wrap justify-center gap-4 print:hidden">
+              <div className="p-4 sm:p-6 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row flex-wrap justify-center gap-3 sm:gap-4 print:hidden">
                 <button 
                   onClick={addNewDay}
-                  className="flex items-center gap-3 px-10 py-3.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-all shadow-lg font-black text-base group active:scale-95"
+                  className="w-full sm:w-auto justify-center flex items-center gap-3 px-6 sm:px-10 py-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-all shadow-lg font-black text-base group active:scale-95"
                 >
                   <Plus size={22} className="group-hover:rotate-90 transition-transform duration-300" />
                   إضافة يوم
@@ -1479,7 +1512,7 @@ export default function App() {
                 <button 
                   onClick={handleSaveAndArchive}
                   disabled={isSaving}
-                  className="flex items-center gap-3 px-10 py-3.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-lg font-black text-base group active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full sm:w-auto justify-center flex items-center gap-3 px-6 sm:px-10 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-lg font-black text-base group active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSaving ? (
                     <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1495,7 +1528,7 @@ export default function App() {
           {/* Summary Section */}
           <div id="summary-section" className="mb-12 print:block">
             {/* Detailed Summary Card */}
-            <div className="w-full bg-white rounded-2xl shadow-lg border border-slate-200 p-8 print:border-slate-300 print:shadow-none print:mt-8">
+            <div className="w-full bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-6 lg:p-8 print:border-slate-300 print:shadow-none print:mt-8">
               <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2 border-b border-slate-100 pb-4">
                 <FileText className="text-emerald-600" />
                 ملخص الحساب الختامي
