@@ -52,15 +52,23 @@ import {
 } from './lib/storage';
 import { useAuth } from './auth/AuthContext';
 import LoginPage from './components/LoginPage';
+import {
+  getNextPeriod,
+  getFirstPeriod,
+  getPeriodInfo,
+  generateDatesForPeriod,
+  createEmptyEntry,
+  type PeriodInfo,
+} from './lib/periodHelper';
 
 interface Entry {
   id: string;
   date: string;
   revenue: number; // إيداع
   coupons: number; // بونات
-  debitNote: string; // مذكرة خطأ مدين
+  debitNote: number; // مذكرة خطأ مدين
   invoices: number; // فواتير
-  creditNote: string; // مذكرة خطأ دائن
+  creditNote: number; // مذكرة خطأ دائن
 }
 
 interface BalanceEntry extends Entry {
@@ -71,45 +79,26 @@ interface Period {
   key: string;
   startDate: string;
   endDate: string;
+  month: number;
+  year: number;
+  startDay?: number;
+  endDay?: number;
   displayLabel: string;
   entries: BalanceEntry[];
   count: number;
   closingBalance: number;
 }
 
-const INITIAL_ENTRIES: Entry[] = Array.from({ length: 14 }, (_, i) => {
-  const date = new Date();
-  date.setDate(date.getDate() - (13 - i));
-  return {
-    id: Math.random().toString(36).substr(2, 9),
-    date: date.toISOString().split('T')[0],
-    revenue: 0,
-    coupons: 0,
-    debitNote: '',
-    invoices: 0,
-    creditNote: '',
-  };
-});
+interface CurrentPeriodMeta {
+  startDate: string;
+  endDate: string;
+  month: number;
+  year: number;
+  startDay: number;
+  endDay: number;
+}
 
 type View = 'ledger' | 'archive-list';
-
-const getPeriodForDate = (date: Date) => {
-  const anchor = new Date('2026-01-05').getTime();
-  const DAY_MS = 24 * 60 * 60 * 1000;
-  const PERIOD_MS = 14 * DAY_MS;
-  
-  const diff = date.getTime() - anchor;
-  const periodIndex = Math.floor(diff / PERIOD_MS);
-  const periodStart = new Date(anchor + periodIndex * PERIOD_MS);
-  const periodEnd = new Date(anchor + (periodIndex + 1) * PERIOD_MS - DAY_MS);
-  
-  return {
-    start: periodStart.toISOString().split('T')[0],
-    end: periodEnd.toISOString().split('T')[0],
-    startDate: periodStart,
-    endDate: periodEnd
-  };
-};
 
 export default function App() {
   const { user, loading: authLoading, signOut } = useAuth();
@@ -127,14 +116,18 @@ export default function App() {
   const [archivePage, setArchivePage] = useState(1);
   const [archiveRowsPerPage, setArchiveRowsPerPage] = useState(10);
   const [archiveSortField, setArchiveSortField] = useState<'date' | 'count' | 'balance'>('date');
-  const [archiveSortDirection, setArchiveSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [archiveSortDirection, setArchiveSortDirection] = useState<'asc' | 'desc'>('asc');
   const [lastAddedId, setLastAddedId] = useState<string | null>(null);
   const [currentPeriodDates, setCurrentPeriodDates] = useState<string[]>([]);
+  const [currentPeriodMeta, setCurrentPeriodMeta] = useState<CurrentPeriodMeta | null>(null);
   const [hasInitializedPeriod, setHasInitializedPeriod] = useState(false);
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [archives, setArchives] = useState<any[]>([]);
   const [viewingArchive, setViewingArchive] = useState<any | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showNewPeriodModal, setShowNewPeriodModal] = useState(false);
+  const [newPeriodStartDate, setNewPeriodStartDate] = useState('');
+  const [newPeriodEndDate, setNewPeriodEndDate] = useState('');
 
   useEffect(() => {
     const handleResize = () => {
@@ -150,12 +143,7 @@ export default function App() {
   const fetchEntries = async () => {
     try {
       const data = await listEntries();
-      if (data.length > 0) {
-        setAllEntries(data);
-      } else {
-        setAllEntries(INITIAL_ENTRIES);
-        await upsertEntries(INITIAL_ENTRIES);
-      }
+      setAllEntries(data);
     } catch (err) {
       console.error("Failed to fetch entries", err);
     }
@@ -180,6 +168,17 @@ export default function App() {
       const data = await listSettings();
       if (data.openingBalance !== undefined) {
         setOpeningBalance(parseFloat(data.openingBalance) || 0);
+      }
+
+      if (data.currentPeriodMeta) {
+        try {
+          const parsed = JSON.parse(data.currentPeriodMeta) as CurrentPeriodMeta;
+          if (parsed?.startDate && parsed?.endDate && parsed?.month && parsed?.year) {
+            setCurrentPeriodMeta(parsed);
+          }
+        } catch (parseError) {
+          console.warn('Invalid currentPeriodMeta setting, ignoring', parseError);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch settings", err);
@@ -216,23 +215,39 @@ export default function App() {
   // Initialize currentPeriodDates when selectedPeriod changes or on first load
   useEffect(() => {
     let startDate: string;
+    let endDate: string;
+
     if (!selectedPeriod) {
-      const now = new Date();
-      const p = getPeriodForDate(now);
-      startDate = p.start;
+      if (currentPeriodMeta) {
+        startDate = currentPeriodMeta.startDate;
+        endDate = currentPeriodMeta.endDate;
+      } else if (allEntries.length > 0) {
+        const latestDate = [...allEntries]
+          .sort((a, b) => b.date.localeCompare(a.date))[0]
+          ?.date;
+
+        if (latestDate) {
+          const inferred = getPeriodInfo(latestDate);
+          startDate = inferred.startDateStr;
+          endDate = inferred.endDateStr;
+        } else {
+          const firstPeriod = getFirstPeriod();
+          startDate = firstPeriod.startDateStr;
+          endDate = firstPeriod.endDateStr;
+        }
+      } else {
+        const firstPeriod = getFirstPeriod();
+        startDate = firstPeriod.startDateStr;
+        endDate = firstPeriod.endDateStr;
+      }
     } else {
-      [startDate] = selectedPeriod.split(' → ');
+      [startDate, endDate] = selectedPeriod.split(' → ');
     }
 
-    const dates: string[] = [];
-    const curr = new Date(startDate);
-    for (let i = 0; i < 14; i++) {
-      dates.push(curr.toISOString().split('T')[0]);
-      curr.setDate(curr.getDate() + 1);
-    }
+    const dates = generateDatesForPeriod(startDate, endDate);
     setCurrentPeriodDates(dates);
     setHasInitializedPeriod(true);
-  }, [selectedPeriod]);
+  }, [selectedPeriod, allEntries, currentPeriodMeta]);
 
   const saveEntries = async (entriesToSave: Entry[]) => {
     try {
@@ -265,8 +280,13 @@ export default function App() {
         // For the current period, we can derive the label from the current view dates
         const start = currentPeriodDates[0];
         const end = currentPeriodDates[currentPeriodDates.length - 1];
+        const currentInfo = start ? getPeriodInfo(start) : getFirstPeriod();
         currentPeriod = {
           key: `${start} → ${end}`,
+          month: currentInfo.month,
+          year: currentInfo.year,
+          startDay: currentInfo.startDay,
+          endDay: currentInfo.endDay,
           displayLabel: `${formatDateArabic(start)} ← ${formatDateArabic(end)}`
         };
       }
@@ -277,7 +297,11 @@ export default function App() {
           totals: totals,
           openingBalance: openingBalance,
           periodKey: currentPeriod.key,
-          displayLabel: currentPeriod.displayLabel
+          displayLabel: currentPeriod.displayLabel,
+          periodMonth: currentPeriod.month,
+          periodYear: currentPeriod.year,
+          periodStartDay: currentPeriod.startDay,
+          periodEndDay: currentPeriod.endDay,
         };
 
         await createArchive({
@@ -309,45 +333,82 @@ export default function App() {
 
   const handleCreateNewPeriod = async () => {
     console.log("handleCreateNewPeriod clicked");
-    if (isCreatingNew) return;
-    setIsCreatingNew(true);
-    
-    try {
-      // 1. Clear entries in Supabase
-      await deleteAllEntries();
-      
-      // 2. Generate new entries
-      console.log("Generating new entries");
-      const newEntries = Array.from({ length: 14 }, (_, i) => {
-        const date = new Date();
-        date.setDate(date.getDate() - (13 - i));
-        return {
-          id: Math.random().toString(36).substr(2, 9),
-          date: date.toISOString().split('T')[0],
-          revenue: 0,
-          coupons: 0,
-          debitNote: '',
-          invoices: 0,
-          creditNote: '',
-        };
-      });
 
-      // 3. Save new state to server first to ensure persistence
-      console.log("Saving new entries to server");
-      await saveEntries(newEntries);
-      console.log("Saving opening balance to server");
+    let suggestedPeriod: PeriodInfo;
+
+    if (currentPeriodMeta) {
+      suggestedPeriod = getNextPeriod(currentPeriodMeta.endDate);
+    } else if (allEntries.length === 0) {
+      suggestedPeriod = getFirstPeriod();
+    } else {
+      const sortedEntries = [...allEntries].sort((a, b) => b.date.localeCompare(a.date));
+      const latestDate = sortedEntries[0].date;
+      const inferredPeriod = getPeriodInfo(latestDate);
+      suggestedPeriod = getNextPeriod(inferredPeriod.endDateStr);
+    }
+
+    // Prefill only (editable by user)
+    setNewPeriodStartDate(suggestedPeriod.startDateStr);
+    setNewPeriodEndDate(suggestedPeriod.endDateStr);
+    setShowNewPeriodModal(true);
+  };
+
+  const handleConfirmCreateNewPeriod = async () => {
+    if (isCreatingNew) return;
+
+    if (!newPeriodStartDate || !newPeriodEndDate) {
+      setNotification({ message: 'يرجى إدخال تاريخ البداية وتاريخ النهاية', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
+
+    const start = new Date(newPeriodStartDate);
+    const end = new Date(newPeriodEndDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      setNotification({ message: 'صيغة التاريخ غير صحيحة', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
+
+    if (start > end) {
+      setNotification({ message: 'تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
+
+    setIsCreatingNew(true);
+
+    try {
+      await deleteAllEntries();
+
+      const dates = generateDatesForPeriod(newPeriodStartDate, newPeriodEndDate);
+      const newEntries = dates.map(dateStr => createEmptyEntry(dateStr));
+      await upsertEntries(newEntries);
+
+      const infoFromStart = getPeriodInfo(newPeriodStartDate);
+      const nextPeriodMeta: CurrentPeriodMeta = {
+        startDate: newPeriodStartDate,
+        endDate: newPeriodEndDate,
+        month: infoFromStart.month,
+        year: infoFromStart.year,
+        startDay: infoFromStart.startDay,
+        endDay: infoFromStart.endDay,
+      };
+
+      await setSetting('currentPeriodMeta', JSON.stringify(nextPeriodMeta));
       await saveOpeningBalance(0);
-      
-      // 4. Update all states at once
-      console.log("Updating local state");
+
       setAllEntries(newEntries);
+      setCurrentPeriodMeta(nextPeriodMeta);
+      setCurrentPeriodDates(dates);
       setOpeningBalance(0);
       setSelectedPeriod(null);
       setViewingArchive(null);
       setView('ledger');
+      setShowNewPeriodModal(false);
       window.scrollTo(0, 0);
-      
-      setNotification({ message: 'تم إنشاء فترة محاسبية جديدة بنجاح', type: 'success' });
+
+      setNotification({ message: 'تم إنشاء الفترة بنجاح بالقيم التي أدخلتها', type: 'success' });
       setTimeout(() => setNotification(null), 3000);
     } catch (err) {
       console.error("Failed to create new period:", err);
@@ -364,8 +425,8 @@ export default function App() {
     let currentBalance = openingBalance;
     
     return sorted.map(entry => {
-      const rowDebit = (entry.revenue || 0) + (entry.coupons || 0);
-      const rowCredit = (entry.invoices || 0);
+      const rowDebit = (Number(entry.revenue) || 0) + (Number(entry.coupons) || 0) + (Number(entry.debitNote) || 0);
+      const rowCredit = (Number(entry.invoices) || 0) + (Number(entry.creditNote) || 0);
       currentBalance = currentBalance + rowDebit - rowCredit;
       return { ...entry, balance: currentBalance } as BalanceEntry;
     });
@@ -382,24 +443,11 @@ export default function App() {
   const periods = useMemo(() => {
     if (entriesWithBalance.length === 0) return [];
 
-    const anchor = new Date('2026-01-05').getTime();
-    const DAY_MS = 24 * 60 * 60 * 1000;
-    const PERIOD_MS = 14 * DAY_MS;
-
     const grouped: Record<string, BalanceEntry[]> = {};
     
     entriesWithBalance.forEach(entry => {
-      const entryTime = new Date(entry.date).getTime();
-      if (isNaN(entryTime)) return; // Skip invalid dates
-      
-      const diff = entryTime - anchor;
-      const periodIndex = Math.floor(diff / PERIOD_MS);
-      const periodStart = new Date(anchor + periodIndex * PERIOD_MS);
-      const periodEnd = new Date(anchor + (periodIndex + 1) * PERIOD_MS - DAY_MS);
-      
-      if (isNaN(periodStart.getTime()) || isNaN(periodEnd.getTime())) return;
-
-      const key = `${periodStart.toISOString().split('T')[0]} → ${periodEnd.toISOString().split('T')[0]}`;
+      const periodInfo = getPeriodInfo(entry.date);
+      const key = `${periodInfo.startDateStr} → ${periodInfo.endDateStr}`;
       if (!grouped[key]) grouped[key] = [];
       grouped[key].push(entry);
     });
@@ -414,11 +462,16 @@ export default function App() {
       const actualEnd = d1 < d2 ? end : start;
       const sortedEntries = entries.sort((a, b) => a.date.localeCompare(b.date));
       const closingBalance = sortedEntries[sortedEntries.length - 1]?.balance ?? 0;
+      const periodInfo = getPeriodInfo(actualStart);
 
       return {
         key,
         startDate: actualStart,
         endDate: actualEnd,
+        month: periodInfo.month,
+        year: periodInfo.year,
+        startDay: periodInfo.startDay,
+        endDay: periodInfo.endDay,
         displayLabel: `${formatDateArabic(actualStart)} ← ${formatDateArabic(actualEnd)}`,
         entries: sortedEntries,
         count: entries.length,
@@ -426,18 +479,23 @@ export default function App() {
       };
     });
 
-    return periodList;
+    return periodList.sort((a, b) => a.startDate.localeCompare(b.startDate));
   }, [entriesWithBalance]);
 
   const archiveList = useMemo(() => {
     return archives.map(arc => {
       const entries = arc.data.entries || [];
       const totals = arc.data.totals || { finalBalance: 0 };
+      const startDate = entries[0]?.date || '';
+      const inferred = startDate ? getPeriodInfo(startDate) : getFirstPeriod();
+
       return {
         id: arc.id,
         key: arc.data.periodKey,
-        startDate: entries[0]?.date || '',
+        startDate,
         endDate: entries[entries.length - 1]?.date || '',
+        month: arc.data.periodMonth ?? inferred.month,
+        year: arc.data.periodYear ?? inferred.year,
         displayLabel: arc.name,
         entries: entries,
         count: entries.filter((e: any) => e.revenue || e.coupons || e.invoices).length,
@@ -450,7 +508,7 @@ export default function App() {
   const archiveStats = useMemo(() => {
     const totalPeriods = archiveList.length;
     const totalTransactions = archiveList.reduce((acc, p) => acc + p.count, 0);
-    const lastClosingBalance = archiveList.length > 0 ? archiveList[0].closingBalance : 0;
+    const lastClosingBalance = archiveList.length > 0 ? archiveList[archiveList.length - 1].closingBalance : 0;
     return { totalPeriods, totalTransactions, lastClosingBalance };
   }, [archiveList]);
 
@@ -540,9 +598,9 @@ export default function App() {
           date,
           revenue: 0,
           coupons: 0,
-          debitNote: '',
+          debitNote: 0,
           invoices: 0,
-          creditNote: '',
+          creditNote: 0,
           balance: lastBalance
         } as BalanceEntry;
       }
@@ -554,19 +612,23 @@ export default function App() {
       return viewingArchive.totals;
     }
 
-    const sumRevenue = currentViewEntries.reduce((acc, curr) => acc + (curr.revenue || 0), 0);
-    const sumCoupons = currentViewEntries.reduce((acc, curr) => acc + (curr.coupons || 0), 0);
-    const sumInvoices = currentViewEntries.reduce((acc, curr) => acc + (curr.invoices || 0), 0);
+    const sumRevenue = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.revenue) || 0), 0);
+    const sumCoupons = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.coupons) || 0), 0);
+    const sumDebitNote = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.debitNote) || 0), 0);
+    const sumInvoices = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.invoices) || 0), 0);
+    const sumCreditNote = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.creditNote) || 0), 0);
     
-    const totalDebit = sumRevenue + sumCoupons;
-    const totalCredit = sumInvoices;
+    const totalDebit = sumRevenue + sumCoupons + sumDebitNote;
+    const totalCredit = sumInvoices + sumCreditNote;
     const finalBalance = currentViewEntries.length > 0 ? currentViewEntries[currentViewEntries.length - 1].balance : openingBalance;
 
     return {
       sumRevenue,
       sumCoupons,
+      sumDebitNote,
       totalDebit,
       sumInvoices,
+      sumCreditNote,
       totalCredit,
       finalBalance
     };
@@ -651,9 +713,9 @@ export default function App() {
         date: field === 'date' ? (value as string) : originalDate,
         revenue: 0,
         coupons: 0,
-        debitNote: '',
+        debitNote: 0,
         invoices: 0,
-        creditNote: '',
+        creditNote: 0,
         [field]: value
       };
       updated = [...allEntries, newEntry];
@@ -864,6 +926,64 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {showNewPeriodModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] bg-slate-900/50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.98 }}
+              className="w-full max-w-xl bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 sm:p-6"
+            >
+              <h3 className="text-xl font-black text-slate-800 mb-2">إنشاء فترة جديدة</h3>
+              <p className="text-sm text-slate-500 font-bold mb-5">
+                تم اقتراح التواريخ تلقائيًا. يمكنك تعديلها بحرية قبل الحفظ.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 mb-2">تاريخ البداية</label>
+                  <CustomDateInput
+                    value={newPeriodStartDate}
+                    onChange={setNewPeriodStartDate}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 mb-2">تاريخ النهاية</label>
+                  <CustomDateInput
+                    value={newPeriodEndDate}
+                    onChange={setNewPeriodEndDate}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-end">
+                <button
+                  onClick={() => setShowNewPeriodModal(false)}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 transition-colors"
+                >
+                  إلغاء
+                </button>
+                <button
+                  onClick={handleConfirmCreateNewPeriod}
+                  disabled={isCreatingNew}
+                  className={`w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-black hover:bg-emerald-700 transition-colors ${isCreatingNew ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isCreatingNew ? 'جاري الإنشاء...' : 'حفظ وإنشاء الفترة'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Sidebar */}
       <aside className={`fixed inset-y-0 right-0 z-50 w-[88vw] max-w-xs bg-white border-l border-slate-200 flex flex-col h-screen print:hidden shadow-lg transform transition-transform duration-300 lg:static lg:w-80 lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : 'translate-x-full'}`}>
         <div className="p-6 border-b border-slate-100">
@@ -1044,7 +1164,7 @@ export default function App() {
                   setArchiveToDate('');
                   setArchiveMinTransactions('');
                   setArchiveSortField('date');
-                  setArchiveSortDirection('desc');
+                  setArchiveSortDirection('asc');
                   setArchivePage(1);
                 }}
                 className="p-2 text-slate-400 hover:text-rose-600 transition-colors"
@@ -1065,7 +1185,7 @@ export default function App() {
                         className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider cursor-pointer hover:text-emerald-600 transition-colors"
                         onClick={() => {
                           if (archiveSortField === 'date') setArchiveSortDirection(archiveSortDirection === 'asc' ? 'desc' : 'asc');
-                          else { setArchiveSortField('date'); setArchiveSortDirection('desc'); }
+                          else { setArchiveSortField('date'); setArchiveSortDirection('asc'); }
                         }}
                       >
                         <div className="flex items-center gap-2">
@@ -1255,7 +1375,7 @@ export default function App() {
                     ) : (
                       <p className="text-slate-500 font-medium flex items-center gap-2 mt-1">
                         <CalendarIcon size={16} />
-                        كشف حساب جاري (أسبوعين)
+                        كشف حساب جاري (نصف شهر)
                       </p>
                     ))}
                   </div>
@@ -1433,12 +1553,12 @@ export default function App() {
                         </td>
                         <td className="p-2 border-l border-slate-200 bg-emerald-50/5">
                           <input 
-                            type="text" 
+                            type="number" 
                             value={entry.debitNote || ''}
-                            placeholder="ملاحظة"
+                            placeholder="0"
                             readOnly={!!viewingArchive}
-                            onChange={(e) => updateEntry(entry.id, 'debitNote', e.target.value)}
-                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-emerald-600 font-bold ${viewingArchive ? 'cursor-default' : ''}`}
+                            onChange={(e) => updateEntry(entry.id, 'debitNote', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-emerald-600 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
                           />
                         </td>
 
@@ -1455,18 +1575,18 @@ export default function App() {
                         </td>
                         <td className="p-2 border-l border-slate-200 bg-rose-50/5">
                           <input 
-                            type="text" 
+                            type="number" 
                             value={entry.creditNote || ''}
-                            placeholder="ملاحظة"
+                            placeholder="0"
                             readOnly={!!viewingArchive}
-                            onChange={(e) => updateEntry(entry.id, 'creditNote', e.target.value)}
-                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-rose-600 font-bold ${viewingArchive ? 'cursor-default' : ''}`}
+                            onChange={(e) => updateEntry(entry.id, 'creditNote', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-rose-600 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
                           />
                         </td>
 
                         {/* Balance Column */}
                         <td className="p-2 text-center font-mono font-black text-slate-700 bg-slate-50/30">
-                          {(viewingArchive || (entry.revenue || entry.coupons || entry.invoices)) 
+                          {(viewingArchive || (entry.revenue || entry.coupons || entry.debitNote || entry.invoices || entry.creditNote)) 
                             ? entry.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })
                             : ""}
                         </td>
@@ -1484,11 +1604,13 @@ export default function App() {
                       {totals.sumCoupons.toLocaleString()}
                     </td>
                     <td className="p-3 border-l border-slate-700 text-center font-mono text-emerald-300 text-sm">
+                      {totals.sumDebitNote.toLocaleString()}
                     </td>
                     <td className="p-3 border-l border-slate-700 text-center font-mono text-rose-400">
                       {totals.sumInvoices.toLocaleString()}
                     </td>
                     <td className="p-3 border-l border-slate-700 text-center font-mono text-rose-300 text-sm">
+                      {totals.sumCreditNote.toLocaleString()}
                     </td>
                     <td className="p-3 text-center font-mono text-lg bg-slate-800">
                       {totals.finalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -1545,6 +1667,10 @@ export default function App() {
                     <span>إجمالي البونات:</span>
                     <span className="font-mono font-semibold text-emerald-600">{totals.sumCoupons.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
+                  <div className="flex justify-between items-center text-slate-600">
+                    <span>إجمالي مذكرة الخطأ (مدين):</span>
+                    <span className="font-mono font-semibold text-emerald-600">{totals.sumDebitNote.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
                   <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
                     <span className="font-bold text-slate-800">إجمالي المدين:</span>
                     <span className="font-mono text-xl font-black text-emerald-700">{totals.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -1556,6 +1682,10 @@ export default function App() {
                   <div className="flex justify-between items-center text-slate-600">
                     <span>إجمالي الفواتير:</span>
                     <span className="font-mono font-semibold text-rose-600">{totals.sumInvoices.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-600">
+                    <span>إجمالي مذكرة الخطأ (دائن):</span>
+                    <span className="font-mono font-semibold text-rose-600">{totals.sumCreditNote.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                   </div>
                   <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
                     <span className="font-bold text-slate-800">إجمالي الدائن:</span>

@@ -5,9 +5,9 @@ interface LedgerEntry {
   date: string;
   revenue: number;
   coupons: number;
-  debitNote: string;
+  debitNote: number;
   invoices: number;
-  creditNote: string;
+  creditNote: number;
 }
 
 interface EntryRow {
@@ -15,9 +15,9 @@ interface EntryRow {
   date: string;
   revenue: number | null;
   coupons: number | null;
-  debit_note: string | null;
+  debit_note: number | null;
   invoices: number | null;
-  credit_note: string | null;
+  credit_note: number | null;
 }
 
 interface SettingRow {
@@ -31,6 +31,10 @@ interface ArchivePayload {
   openingBalance: number;
   periodKey: string;
   displayLabel: string;
+  periodMonth?: number;
+  periodYear?: number;
+  periodStartDay?: number;
+  periodEndDay?: number;
 }
 
 interface ArchiveRow {
@@ -45,9 +49,9 @@ const mapEntryRow = (row: EntryRow): LedgerEntry => ({
   date: row.date,
   revenue: row.revenue ?? 0,
   coupons: row.coupons ?? 0,
-  debitNote: row.debit_note ?? '',
+  debitNote: row.debit_note ?? 0,
   invoices: row.invoices ?? 0,
-  creditNote: row.credit_note ?? '',
+  creditNote: row.credit_note ?? 0,
 });
 
 const toEntryRow = (entry: LedgerEntry): EntryRow => ({

@@ -3,10 +3,22 @@ create table if not exists public.entries (
   date date not null,
   revenue numeric not null default 0,
   coupons numeric not null default 0,
-  debit_note text not null default '',
+  debit_note numeric not null default 0,
   invoices numeric not null default 0,
-  credit_note text not null default ''
+  credit_note numeric not null default 0
 );
+
+alter table public.entries
+  alter column debit_note type numeric
+  using coalesce(nullif(trim(debit_note::text), ''), '0')::numeric;
+
+alter table public.entries
+  alter column credit_note type numeric
+  using coalesce(nullif(trim(credit_note::text), ''), '0')::numeric;
+
+alter table public.entries
+  alter column debit_note set default 0,
+  alter column credit_note set default 0;
 
 create table if not exists public.settings (
   key text primary key,
