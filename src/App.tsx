@@ -37,7 +37,8 @@ import {
   Clock,
   CalendarDays,
   LogOut,
-  Menu
+  Menu,
+  BarChart3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -52,6 +53,9 @@ import {
 } from './lib/storage';
 import { useAuth } from './auth/AuthContext';
 import LoginPage from './components/LoginPage';
+import { CustomDateInput } from './components/CustomDateInput';
+import ReportsPage from './pages/ReportsPage';
+import ArchiveListPage from './pages/ArchiveListPage';
 import {
   getNextPeriod,
   getFirstPeriod,
@@ -99,7 +103,7 @@ interface CurrentPeriodMeta {
   endDay: number;
 }
 
-type View = 'ledger' | 'archive-list';
+type View = 'ledger' | 'archive-list' | 'reports';
 
 export default function App() {
   const { user, loading: authLoading, signOut } = useAuth();
@@ -118,6 +122,11 @@ export default function App() {
   const [archiveRowsPerPage, setArchiveRowsPerPage] = useState(10);
   const [archiveSortField, setArchiveSortField] = useState<'date' | 'count' | 'balance'>('date');
   const [archiveSortDirection, setArchiveSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [reportFromMonth, setReportFromMonth] = useState('');
+  const [reportToMonth, setReportToMonth] = useState('');
+  const [isCompareEnabled, setIsCompareEnabled] = useState(false);
+  const [compareFromMonth, setCompareFromMonth] = useState('');
+  const [compareToMonth, setCompareToMonth] = useState('');
   const [lastAddedId, setLastAddedId] = useState<string | null>(null);
   const [currentPeriodDates, setCurrentPeriodDates] = useState<string[]>([]);
   const [currentPeriodMeta, setCurrentPeriodMeta] = useState<CurrentPeriodMeta | null>(null);
@@ -490,17 +499,28 @@ export default function App() {
       const totals = arc.data.totals || { finalBalance: 0 };
       const startDate = entries[0]?.date || '';
       const inferred = startDate ? getPeriodInfo(startDate) : getFirstPeriod();
+      const periodMonth = arc.data.periodMonth ?? inferred.month;
+      const periodYear = arc.data.periodYear ?? inferred.year;
+      const monthKey = `${periodYear}-${String(periodMonth).padStart(2, '0')}`;
+
+      const totalDebit = Number((totals as any).totalDebit ?? 0) || 0;
+      const totalCredit = Number((totals as any).totalCredit ?? 0) || 0;
+      const net = totalDebit - totalCredit;
 
       return {
         id: arc.id,
         key: arc.data.periodKey,
         startDate,
         endDate: entries[entries.length - 1]?.date || '',
-        month: arc.data.periodMonth ?? inferred.month,
-        year: arc.data.periodYear ?? inferred.year,
+        month: periodMonth,
+        year: periodYear,
+        monthKey,
         displayLabel: arc.name,
         entries: entries,
         count: entries.filter((e: any) => e.revenue || e.coupons || e.invoices).length,
+        totalDebit,
+        totalCredit,
+        net,
         closingBalance: totals.finalBalance,
         fullData: arc.data
       };
@@ -513,6 +533,133 @@ export default function App() {
     const lastClosingBalance = archiveList.length > 0 ? archiveList[archiveList.length - 1].closingBalance : 0;
     return { totalPeriods, totalTransactions, lastClosingBalance };
   }, [archiveList]);
+
+  const monthLabel = (monthKey: string) => {
+    if (!monthKey) return '-';
+    const [year, month] = monthKey.split('-').map(Number);
+    const date = new Date(year, (month || 1) - 1, 1);
+    return date.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' });
+  };
+
+  const monthNumber = (monthKey: string) => {
+    if (!monthKey || !monthKey.includes('-')) return 0;
+    const [year, month] = monthKey.split('-').map(Number);
+    return (year * 100) + month;
+  };
+
+  const uniqueArchiveMonths = useMemo(() => {
+    const unique = new Set(archiveList.map(a => a.monthKey).filter(Boolean));
+    return Array.from(unique).sort((a, b) => monthNumber(a) - monthNumber(b));
+  }, [archiveList]);
+
+  useEffect(() => {
+    if (uniqueArchiveMonths.length === 0) return;
+
+    const lastMonth = uniqueArchiveMonths[uniqueArchiveMonths.length - 1];
+    const fromIndex = Math.max(0, uniqueArchiveMonths.length - 6);
+    const defaultFrom = uniqueArchiveMonths[fromIndex];
+
+    if (!reportFromMonth) setReportFromMonth(defaultFrom);
+    if (!reportToMonth) setReportToMonth(lastMonth);
+
+    if (!compareFromMonth || !compareToMonth) {
+      const [toYear, toMonth] = (reportToMonth || lastMonth).split('-').map(Number);
+      const [fromYear, fromMonth] = (reportFromMonth || defaultFrom).split('-').map(Number);
+
+      const safeToYear = Number.isFinite(toYear) ? toYear : new Date().getFullYear();
+      const safeToMonth = Number.isFinite(toMonth) ? toMonth : 1;
+      const safeFromYear = Number.isFinite(fromYear) ? fromYear : safeToYear;
+      const safeFromMonth = Number.isFinite(fromMonth) ? fromMonth : safeToMonth;
+
+      setCompareFromMonth(`${safeFromYear - 1}-${String(safeFromMonth).padStart(2, '0')}`);
+      setCompareToMonth(`${safeToYear - 1}-${String(safeToMonth).padStart(2, '0')}`);
+    }
+  }, [uniqueArchiveMonths, reportFromMonth, reportToMonth, compareFromMonth, compareToMonth]);
+
+  const buildReportRows = (fromMonth: string, toMonth: string) => {
+    if (!fromMonth || !toMonth) return [] as Array<{ monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>;
+
+    const fromNum = monthNumber(fromMonth);
+    const toNum = monthNumber(toMonth);
+    if (!fromNum || !toNum) return [];
+
+    const rangeStart = Math.min(fromNum, toNum);
+    const rangeEnd = Math.max(fromNum, toNum);
+
+    const grouped = new Map<string, { monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>();
+
+    archiveList.forEach(period => {
+      const currentNum = monthNumber(period.monthKey);
+      if (currentNum < rangeStart || currentNum > rangeEnd) return;
+
+      const existing = grouped.get(period.monthKey) || {
+        monthKey: period.monthKey,
+        label: monthLabel(period.monthKey),
+        totalDebit: 0,
+        totalCredit: 0,
+        net: 0,
+      };
+
+      existing.totalDebit += Number(period.totalDebit) || 0;
+      existing.totalCredit += Number(period.totalCredit) || 0;
+      existing.net = existing.totalDebit - existing.totalCredit;
+      grouped.set(period.monthKey, existing);
+    });
+
+    return Array.from(grouped.values()).sort((a, b) => monthNumber(a.monthKey) - monthNumber(b.monthKey));
+  };
+
+  const reportRows = useMemo(() => buildReportRows(reportFromMonth, reportToMonth), [archiveList, reportFromMonth, reportToMonth]);
+
+  const reportSummary = useMemo(() => {
+    const totalDebit = reportRows.reduce((sum, row) => sum + row.totalDebit, 0);
+    const totalCredit = reportRows.reduce((sum, row) => sum + row.totalCredit, 0);
+    const netBalance = totalDebit - totalCredit;
+    return { totalDebit, totalCredit, netBalance };
+  }, [reportRows]);
+
+  const compareRows = useMemo(() => {
+    if (!isCompareEnabled) return [] as Array<{ monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>;
+    return buildReportRows(compareFromMonth, compareToMonth);
+  }, [archiveList, isCompareEnabled, compareFromMonth, compareToMonth]);
+
+  const compareSummary = useMemo(() => {
+    const totalDebit = compareRows.reduce((sum, row) => sum + row.totalDebit, 0);
+    const totalCredit = compareRows.reduce((sum, row) => sum + row.totalCredit, 0);
+    const netBalance = totalDebit - totalCredit;
+    return { totalDebit, totalCredit, netBalance };
+  }, [compareRows]);
+
+  const comparisonDelta = useMemo(() => {
+    if (!isCompareEnabled) {
+      return {
+        debitDiff: 0,
+        creditDiff: 0,
+        netDiff: 0,
+        debitPct: null as number | null,
+        creditPct: null as number | null,
+        netPct: null as number | null,
+      };
+    }
+
+    const debitDiff = reportSummary.totalDebit - compareSummary.totalDebit;
+    const creditDiff = reportSummary.totalCredit - compareSummary.totalCredit;
+    const netDiff = reportSummary.netBalance - compareSummary.netBalance;
+
+    const calcPct = (current: number, previous: number) => {
+      if (!previous) return null;
+      return ((current - previous) / Math.abs(previous)) * 100;
+    };
+
+    return {
+      debitDiff,
+      creditDiff,
+      netDiff,
+      debitPct: calcPct(reportSummary.totalDebit, compareSummary.totalDebit),
+      creditPct: calcPct(reportSummary.totalCredit, compareSummary.totalCredit),
+      netPct: calcPct(reportSummary.netBalance, compareSummary.netBalance),
+    };
+  }, [isCompareEnabled, reportSummary, compareSummary]);
 
   const filteredPeriods = useMemo(() => {
     let result = [...archiveList];
@@ -891,6 +1038,22 @@ export default function App() {
     }
   };
 
+  const applyFlexibleReportRange = (monthsCount: number) => {
+    if (uniqueArchiveMonths.length === 0) return;
+
+    const targetTo = reportToMonth || uniqueArchiveMonths[uniqueArchiveMonths.length - 1];
+    const toIndex = Math.max(0, uniqueArchiveMonths.indexOf(targetTo));
+    const fromIndex = Math.max(0, toIndex - monthsCount + 1);
+
+    setReportFromMonth(uniqueArchiveMonths[fromIndex]);
+    setReportToMonth(uniqueArchiveMonths[toIndex]);
+  };
+
+  const handleShowReport = () => {
+    const el = document.getElementById('advanced-report-section');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-100 flex items-center justify-center" dir="rtl">
@@ -1050,7 +1213,7 @@ export default function App() {
             <div>
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
                 <Archive size={14} />
-                الأرشيف
+                الأرشيف والتقارير
               </h3>
               <div className="space-y-2">
                 <button 
@@ -1065,6 +1228,20 @@ export default function App() {
                   <div className="flex items-center gap-3">
                     <Archive size={18} />
                     <span className="font-bold">الأرشيف</span>
+                  </div>
+                </button>
+                <button 
+                  onClick={() => {
+                    setView('reports');
+                    setViewingArchive(null);
+                    setSelectedPeriod(null);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${view === 'reports' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <BarChart3 size={18} />
+                    <span className="font-bold">التقارير</span>
                   </div>
                 </button>
               </div>
@@ -1096,258 +1273,60 @@ export default function App() {
       {/* Main Content */}
       <div className="flex-1 min-h-screen overflow-y-auto w-full">
         {view === 'archive-list' ? (
-          <div className="p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto">
-            {/* Header Section */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-              <div>
-                <h2 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-800 flex items-center gap-3">
-                  <Archive size={28} className="text-emerald-600 sm:w-9 sm:h-9" />
-                  الأرشيف
-                </h2>
-                <p className="text-slate-500 font-bold mt-2">عرض وتنظيم الفترات المحاسبية السابقة</p>
-              </div>
-              <button 
-                onClick={handleCreateNewPeriod}
-                disabled={isCreatingNew}
-                className={`w-full sm:w-auto justify-center bg-emerald-600 text-white px-5 py-3 rounded-xl font-black hover:bg-emerald-700 transition-all shadow-lg flex items-center gap-2 ${isCreatingNew ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                {isCreatingNew ? (
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                ) : (
-                  <Plus size={20} />
-                )}
-                {isCreatingNew ? 'جاري الإنشاء...' : 'إنشاء فترة محاسبية جديدة'}
-              </button>
-            </div>
-
-            {/* Statistics Section */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-8">
-              <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                <div className="bg-blue-50 p-3 rounded-xl text-blue-600">
-                  <Archive size={24} />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">إجمالي الفترات</p>
-                  <p className="text-2xl font-black text-slate-800">{archiveStats.totalPeriods}</p>
-                </div>
-              </div>
-              <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-                <div className="bg-rose-50 p-3 rounded-xl text-rose-600">
-                  <Calculator size={24} />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">آخر رصيد إغلاق</p>
-                  <p className="text-2xl font-black text-slate-800 font-mono">{archiveStats.lastClosingBalance.toLocaleString()}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Search & Filter Bar */}
-            <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-center gap-3 sm:gap-4">
-              <div className="flex-1 min-w-[160px] relative w-full sm:w-auto">
-                <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  type="text"
-                  placeholder="بحث عن فترة (بالتاريخ)..."
-                  value={archiveSearch}
-                  onChange={(e) => setArchiveSearch(e.target.value)}
-                  className="w-full pr-10 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-sm"
-                />
-              </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <span className="text-xs font-bold text-slate-400">من:</span>
-                <CustomDateInput 
-                  value={archiveFromDate}
-                  onChange={setArchiveFromDate}
-                  className="bg-slate-50 w-full sm:w-48"
-                />
-              </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <span className="text-xs font-bold text-slate-400">إلى:</span>
-                <CustomDateInput 
-                  value={archiveToDate}
-                  onChange={setArchiveToDate}
-                  className="bg-slate-50 w-full sm:w-48"
-                />
-              </div>
-              <button 
-                onClick={() => {
-                  setArchiveSearch('');
-                  setArchiveFromDate('');
-                  setArchiveToDate('');
-                  setArchiveMinTransactions('');
-                  setArchiveSortField('date');
-                  setArchiveSortDirection('asc');
-                  setArchivePage(1);
-                }}
-                className="p-2 text-slate-400 hover:text-rose-600 transition-colors"
-                title="إعادة تعيين الفلاتر"
-              >
-                <RotateCcw size={20} />
-              </button>
-            </div>
-
-            {/* Table Section */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-right border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider">#</th>
-                      <th 
-                        className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider cursor-pointer hover:text-emerald-600 transition-colors"
-                        onClick={() => {
-                          if (archiveSortField === 'date') setArchiveSortDirection(archiveSortDirection === 'asc' ? 'desc' : 'asc');
-                          else { setArchiveSortField('date'); setArchiveSortDirection('asc'); }
-                        }}
-                      >
-                        <div className="flex items-center gap-2">
-                          تاريخ البداية
-                          <ArrowUpDown size={14} className={archiveSortField === 'date' ? 'text-emerald-600' : 'opacity-20'} />
-                        </div>
-                      </th>
-                      <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider">تاريخ النهاية</th>
-                      <th 
-                        className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider cursor-pointer hover:text-emerald-600 transition-colors text-center"
-                        onClick={() => {
-                          if (archiveSortField === 'balance') setArchiveSortDirection(archiveSortDirection === 'asc' ? 'desc' : 'asc');
-                          else { setArchiveSortField('balance'); setArchiveSortDirection('desc'); }
-                        }}
-                      >
-                        <div className="flex items-center justify-center gap-2">
-                          رصيد الإغلاق
-                          <ArrowUpDown size={14} className={archiveSortField === 'balance' ? 'text-emerald-600' : 'opacity-20'} />
-                        </div>
-                      </th>
-                      <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider text-center">إجراء</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginatedPeriods.length > 0 ? paginatedPeriods.map((period, index) => (
-                      <tr key={period.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors group">
-                        <td className="p-4 font-bold text-slate-400 text-sm">
-                          {(archivePage - 1) * archiveRowsPerPage + index + 1}
-                        </td>
-                        <td className="p-4 font-black text-slate-700 font-mono text-sm">
-                          <span dir="ltr">{formatDateArabic(period.startDate)}</span>
-                        </td>
-                        <td className="p-4 font-black text-slate-700 font-mono text-sm">
-                          <span dir="ltr">{formatDateArabic(period.endDate)}</span>
-                        </td>
-                        <td className="p-4 text-center font-mono font-black text-emerald-700">
-                          {period.closingBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="p-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <button 
-                              onClick={() => {
-                                setViewingArchive(period.fullData);
-                                setView('ledger');
-                              }}
-                              className="bg-emerald-50 text-emerald-600 px-4 py-2 rounded-lg font-bold text-xs hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-2"
-                            >
-                              فتح الفترة
-                              <ChevronLeft size={14} />
-                            </button>
-                            <button 
-                              className="p-2 text-slate-300 hover:text-slate-600 transition-colors"
-                              title="عرض التفاصيل"
-                            >
-                              <FileText size={18} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    )) : (
-                      <tr>
-                        <td colSpan={5} className="p-12 text-center">
-                          <div className="flex flex-col items-center gap-3 text-slate-400">
-                            <Archive size={48} className="opacity-20" />
-                            <p className="font-bold">لا توجد فترات تطابق معايير البحث</p>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination Section */}
-              <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-                  <span className="text-xs font-bold text-slate-400">عرض:</span>
-                  <select 
-                    value={archiveRowsPerPage}
-                    onChange={(e) => {
-                      setArchiveRowsPerPage(parseInt(e.target.value));
-                      setArchivePage(1);
-                    }}
-                    className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value={10}>10 فترات</option>
-                    <option value={20}>20 فترة</option>
-                    <option value={50}>50 فترة</option>
-                  </select>
-                  <span className="text-xs font-bold text-slate-400">
-                    عرض {Math.min(filteredPeriods.length, (archivePage - 1) * archiveRowsPerPage + 1)} - {Math.min(filteredPeriods.length, archivePage * archiveRowsPerPage)} من {filteredPeriods.length}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button 
-                    disabled={archivePage === 1}
-                    onClick={() => setArchivePage(1)}
-                    className="p-2 rounded-lg hover:bg-white border border-transparent hover:border-slate-200 disabled:opacity-20 transition-all"
-                  >
-                    <ChevronFirst size={18} />
-                  </button>
-                  <button 
-                    disabled={archivePage === 1}
-                    onClick={() => setArchivePage(prev => prev - 1)}
-                    className="flex items-center gap-1 px-3 py-2 rounded-lg hover:bg-white border border-transparent hover:border-slate-200 disabled:opacity-20 transition-all font-bold text-xs"
-                  >
-                    <ChevronRight size={18} />
-                    السابق
-                  </button>
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                      let pageNum = i + 1;
-                      if (totalPages > 5 && archivePage > 3) {
-                        pageNum = archivePage - 3 + i + 1;
-                        if (pageNum > totalPages) pageNum = totalPages - (4 - i);
-                      }
-                      if (pageNum <= 0) return null;
-                      if (pageNum > totalPages) return null;
-
-                      return (
-                        <button 
-                          key={pageNum}
-                          onClick={() => setArchivePage(pageNum)}
-                          className={`w-8 h-8 rounded-lg font-bold text-xs transition-all ${archivePage === pageNum ? 'bg-emerald-600 text-white shadow-md' : 'hover:bg-white border border-transparent hover:border-slate-200 text-slate-600'}`}
-                        >
-                          {pageNum}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <button 
-                    disabled={archivePage === totalPages || totalPages === 0}
-                    onClick={() => setArchivePage(prev => prev + 1)}
-                    className="flex items-center gap-1 px-3 py-2 rounded-lg hover:bg-white border border-transparent hover:border-slate-200 disabled:opacity-20 transition-all font-bold text-xs"
-                  >
-                    التالي
-                    <ChevronLeft size={18} />
-                  </button>
-                  <button 
-                    disabled={archivePage === totalPages || totalPages === 0}
-                    onClick={() => setArchivePage(totalPages)}
-                    className="p-2 rounded-lg hover:bg-white border border-transparent hover:border-slate-200 disabled:opacity-20 transition-all"
-                  >
-                    <ChevronLast size={18} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ArchiveListPage
+            archiveList={archiveList}
+            archiveSearch={archiveSearch}
+            archiveFromDate={archiveFromDate}
+            archiveToDate={archiveToDate}
+            archiveMinTransactions={archiveMinTransactions}
+            archiveSortField={archiveSortField}
+            archiveSortDirection={archiveSortDirection}
+            archivePage={archivePage}
+            archiveRowsPerPage={archiveRowsPerPage}
+            isCreatingNew={isCreatingNew}
+            onSearchChange={setArchiveSearch}
+            onFromDateChange={setArchiveFromDate}
+            onToDateChange={setArchiveToDate}
+            onMinTransactionsChange={setArchiveMinTransactions}
+            onSortFieldChange={setArchiveSortField}
+            onSortDirectionChange={setArchiveSortDirection}
+            onPageChange={setArchivePage}
+            onRowsPerPageChange={setArchiveRowsPerPage}
+            onResetFilters={() => {
+              setArchiveSearch('');
+              setArchiveFromDate('');
+              setArchiveToDate('');
+              setArchiveMinTransactions('');
+              setArchiveSortField('date');
+              setArchiveSortDirection('asc');
+              setArchivePage(1);
+            }}
+            onCreateNewPeriod={handleCreateNewPeriod}
+            onOpenPeriod={(period) => {
+              setViewingArchive(period.fullData);
+              setView('ledger');
+            }}
+          />
+        ) : view === 'reports' ? (
+          <ReportsPage
+            reportFromMonth={reportFromMonth}
+            reportToMonth={reportToMonth}
+            isCompareEnabled={isCompareEnabled}
+            compareFromMonth={compareFromMonth}
+            compareToMonth={compareToMonth}
+            reportRows={reportRows}
+            reportSummary={reportSummary}
+            compareRows={compareRows}
+            compareSummary={compareSummary}
+            comparisonDelta={comparisonDelta}
+            uniqueArchiveMonths={uniqueArchiveMonths}
+            onFromMonthChange={setReportFromMonth}
+            onToMonthChange={setReportToMonth}
+            onCompareToggle={() => setIsCompareEnabled(prev => !prev)}
+            onCompareFromMonthChange={setCompareFromMonth}
+            onCompareToMonthChange={setCompareToMonth}
+            onApplyFlexibleRange={applyFlexibleReportRange}
+          />
         ) : (
           <>
             {/* Header */}
