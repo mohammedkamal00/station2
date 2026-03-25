@@ -72,6 +72,7 @@ interface Entry {
 }
 
 interface BalanceEntry extends Entry {
+  rowBalance: number;
   balance: number;
 }
 
@@ -427,8 +428,9 @@ export default function App() {
     return sorted.map(entry => {
       const rowDebit = (Number(entry.revenue) || 0) + (Number(entry.coupons) || 0) + (Number(entry.debitNote) || 0);
       const rowCredit = (Number(entry.invoices) || 0) + (Number(entry.creditNote) || 0);
-      currentBalance = currentBalance + rowDebit - rowCredit;
-      return { ...entry, balance: currentBalance } as BalanceEntry;
+      const rowBalance = rowDebit - rowCredit;
+      currentBalance = currentBalance + rowBalance;
+      return { ...entry, rowBalance, balance: currentBalance } as BalanceEntry;
     });
   }, [allEntries, openingBalance]);
 
@@ -565,7 +567,17 @@ export default function App() {
   // Filter entries for the current view
   const currentViewEntries = useMemo(() => {
     if (viewingArchive) {
-      return viewingArchive.entries;
+      const entries = viewingArchive.entries || [];
+      return entries.map((entry: any) => {
+        const rowDebit = (Number(entry.revenue) || 0) + (Number(entry.coupons) || 0) + (Number(entry.debitNote) || 0);
+        const rowCredit = (Number(entry.invoices) || 0) + (Number(entry.creditNote) || 0);
+        const rowBalance = rowDebit - rowCredit;
+        return {
+          ...entry,
+          rowBalance,
+          balance: Number(entry.balance) || 0,
+        } as BalanceEntry;
+      });
     }
 
     // Use the stable currentPeriodDates state
@@ -601,6 +613,7 @@ export default function App() {
           debitNote: 0,
           invoices: 0,
           creditNote: 0,
+          rowBalance: 0,
           balance: lastBalance
         } as BalanceEntry;
       }
@@ -1586,8 +1599,12 @@ export default function App() {
 
                         {/* Balance Column */}
                         <td className="p-2 text-center font-mono font-black text-slate-700 bg-slate-50/30">
-                          {(viewingArchive || (entry.revenue || entry.coupons || entry.debitNote || entry.invoices || entry.creditNote)) 
-                            ? entry.balance.toLocaleString(undefined, { minimumFractionDigits: 2 })
+                          {((Number(entry.revenue) || 0) !== 0 ||
+                            (Number(entry.coupons) || 0) !== 0 ||
+                            (Number(entry.debitNote) || 0) !== 0 ||
+                            (Number(entry.invoices) || 0) !== 0 ||
+                            (Number(entry.creditNote) || 0) !== 0)
+                            ? (Number(entry.rowBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })
                             : ""}
                         </td>
                       </motion.tr>
