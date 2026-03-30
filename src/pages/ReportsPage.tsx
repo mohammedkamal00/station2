@@ -4,7 +4,8 @@ import {
   Calendar,
   TrendingUp,
   TrendingDown,
-  Zap
+  Zap,
+  X
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -65,6 +66,21 @@ const getMonthBefore = (fromDate: string, monthsBack: number): string => {
   return `${newYear}-${String(newMonth).padStart(2, '0')}`;
 };
 
+// دالة لتنسيق الشهر واللسان بصيغة عربية
+const formatMonthDisplay = (dateStr: string): string => {
+  if (!dateStr) return '';
+  const [year, month] = dateStr.split('-');
+  const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+                      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+  return `${monthNames[parseInt(month) - 1]} ${year}`;
+};
+
+// دالة للحصول على أول شهر من السنة الحالية
+const getFirstMonthOfYear = (fromDate: string): string => {
+  const [year] = fromDate.split('-');
+  return `${year}-01`;
+};
+
 export default function ReportsPage({
   reportFromMonth,
   reportToMonth,
@@ -85,6 +101,7 @@ export default function ReportsPage({
   onApplyFlexibleRange,
 }: ReportsPageProps) {
   const [showDetailTable, setShowDetailTable] = useState(false);
+  const [activeQuickRange, setActiveQuickRange] = useState<number | string | null>(null);
 
   // الحصول على آخر شهر متاح
   const latestMonth = useMemo(() => {
@@ -92,14 +109,39 @@ export default function ReportsPage({
   }, [uniqueArchiveMonths]);
 
   // دوال الأزرار السريعة
-  const handleQuickRange = (months: number) => {
+  const handleQuickRange = (months: number | 'year') => {
     if (!latestMonth) return;
     
     const toMonth = latestMonth;
-    const fromMonth = getMonthBefore(toMonth, months - 1);
+    let fromMonth: string;
+    
+    if (months === 'year') {
+      fromMonth = getFirstMonthOfYear(toMonth);
+      setActiveQuickRange('year');
+    } else {
+      fromMonth = getMonthBefore(toMonth, months - 1);
+      setActiveQuickRange(months);
+    }
     
     onToMonthChange(toMonth);
     onFromMonthChange(fromMonth);
+  };
+
+  // مسح الاختيار السريع عند تغيير يدوي
+  const handleManualFromChange = (value: string) => {
+    setActiveQuickRange(null);
+    onFromMonthChange(value);
+  };
+
+  const handleManualToChange = (value: string) => {
+    setActiveQuickRange(null);
+    onToMonthChange(value);
+  };
+
+  const clearSelection = () => {
+    setActiveQuickRange(null);
+    onFromMonthChange('');
+    onToMonthChange('');
   };
 
   return (
@@ -117,24 +159,111 @@ export default function ReportsPage({
         <p className="text-slate-500 font-semibold">تحليل شامل للحركات المالية عبر الفترات الزمنية</p>
       </div>
 
-      {/* Period Selection Card */}
+      {/* Quick Range Buttons */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
+        className="bg-gradient-to-r from-emerald-50 to-blue-50 rounded-2xl border border-emerald-200 shadow-sm p-6 mb-6"
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <Zap size={20} className="text-emerald-600" />
+          <h3 className="text-lg font-black text-slate-800">اختر الفترة بسرعة</h3>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <button
+            onClick={() => handleQuickRange(3)}
+            className={`px-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${
+              activeQuickRange === 3
+                ? 'bg-blue-600 text-white shadow-lg border-2 border-blue-700'
+                : 'bg-white text-blue-700 border-2 border-blue-200 hover:shadow-md hover:border-blue-300'
+            }`}
+          >
+            <Zap size={16} />
+            آخر 3 شهور
+          </button>
+          <button
+            onClick={() => handleQuickRange(6)}
+            className={`px-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${
+              activeQuickRange === 6
+                ? 'bg-purple-600 text-white shadow-lg border-2 border-purple-700'
+                : 'bg-white text-purple-700 border-2 border-purple-200 hover:shadow-md hover:border-purple-300'
+            }`}
+          >
+            <Zap size={16} />
+            آخر 6 شهور
+          </button>
+          <button
+            onClick={() => handleQuickRange(12)}
+            className={`px-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${
+              activeQuickRange === 12
+                ? 'bg-orange-600 text-white shadow-lg border-2 border-orange-700'
+                : 'bg-white text-orange-700 border-2 border-orange-200 hover:shadow-md hover:border-orange-300'
+            }`}
+          >
+            <Zap size={16} />
+            آخر 12 شهر
+          </button>
+          <button
+            onClick={() => handleQuickRange('year')}
+            className={`px-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${
+              activeQuickRange === 'year'
+                ? 'bg-emerald-600 text-white shadow-lg border-2 border-emerald-700'
+                : 'bg-white text-emerald-700 border-2 border-emerald-200 hover:shadow-md hover:border-emerald-300'
+            }`}
+          >
+            <Calendar size={16} />
+            من بداية السنة
+          </button>
+        </div>
+      </motion.div>
+
+      {/* Selected Period Display */}
+      {(reportFromMonth || reportToMonth) && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-2xl border-2 border-emerald-200 p-4 mb-6 flex items-center justify-between"
+        >
+          <div className="flex items-center gap-3">
+            <Calendar size={20} className="text-emerald-600" />
+            <div>
+              <p className="text-xs font-bold text-slate-400 uppercase">الفترة المختارة</p>
+              <p className="text-lg font-black text-slate-800">
+                من <span className="text-emerald-600">{formatMonthDisplay(reportFromMonth)}</span> إلى{' '}
+                <span className="text-emerald-600">{formatMonthDisplay(reportToMonth)}</span>
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={clearSelection}
+            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+            title="مسح الاختيار"
+          >
+            <X size={20} />
+          </button>
+        </motion.div>
+      )}
+
+      {/* Manual Period Selection Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
         className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6"
       >
         <div className="flex items-center gap-2 mb-5">
-          <Calendar size={20} className="text-emerald-600" />
-          <h3 className="text-lg font-black text-slate-800">اختر الفترة الزمنية</h3>
+          <Calendar size={20} className="text-slate-600" />
+          <h3 className="text-lg font-black text-slate-800">اختر الفترة يدويًا</h3>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-bold text-slate-600 mb-2">من (الشهر/السنة)</label>
             <input
               type="month"
               value={reportFromMonth}
-              onChange={(e) => onFromMonthChange(e.target.value)}
+              onChange={(e) => handleManualFromChange(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
             />
           </div>
@@ -143,37 +272,9 @@ export default function ReportsPage({
             <input
               type="month"
               value={reportToMonth}
-              onChange={(e) => onToMonthChange(e.target.value)}
+              onChange={(e) => handleManualToChange(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
             />
-          </div>
-        </div>
-
-        {/* Quick Range Buttons */}
-        <div className="space-y-3">
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">أزرار سريعة</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <button
-              onClick={() => handleQuickRange(3)}
-              className="px-4 py-3 rounded-lg font-bold text-sm bg-gradient-to-br from-blue-50 to-blue-100 text-blue-700 border border-blue-200 hover:shadow-md transition-all active:scale-95"
-            >
-              <Zap size={16} className="inline mr-2" />
-              آخر 3 شهور
-            </button>
-            <button
-              onClick={() => handleQuickRange(6)}
-              className="px-4 py-3 rounded-lg font-bold text-sm bg-gradient-to-br from-purple-50 to-purple-100 text-purple-700 border border-purple-200 hover:shadow-md transition-all active:scale-95"
-            >
-              <Zap size={16} className="inline mr-2" />
-              آخر 6 شهور
-            </button>
-            <button
-              onClick={() => handleQuickRange(12)}
-              className="px-4 py-3 rounded-lg font-bold text-sm bg-gradient-to-br from-orange-50 to-orange-100 text-orange-700 border border-orange-200 hover:shadow-md transition-all active:scale-95"
-            >
-              <Zap size={16} className="inline mr-2" />
-              آخر 12 شهر
-            </button>
           </div>
         </div>
       </motion.div>
@@ -183,7 +284,7 @@ export default function ReportsPage({
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
+          transition={{ delay: 0.15 }}
           className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"
         >
           {/* Debit Card */}
