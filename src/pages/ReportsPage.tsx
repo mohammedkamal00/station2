@@ -5,7 +5,8 @@ import {
   TrendingUp,
   TrendingDown,
   Zap,
-  X
+  X,
+  Plus
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -50,6 +51,7 @@ interface ReportsPageProps {
   onCompareFromMonthChange: (value: string) => void;
   onCompareToMonthChange: (value: string) => void;
   onApplyFlexibleRange: (months: number) => void;
+  onCreateNewPeriod?: () => void;
 }
 
 // دالة للحصول على تاريخ قبل عدد معين من الأشهر
@@ -99,6 +101,7 @@ export default function ReportsPage({
   onCompareFromMonthChange,
   onCompareToMonthChange,
   onApplyFlexibleRange,
+  onCreateNewPeriod,
 }: ReportsPageProps) {
   const [showDetailTable, setShowDetailTable] = useState(false);
   const [activeQuickRange, setActiveQuickRange] = useState<number | string | null>(null);
@@ -152,10 +155,23 @@ export default function ReportsPage({
     >
       {/* Header */}
       <div className="mb-8">
-        <h2 className="text-3xl sm:text-4xl font-black text-slate-800 flex items-center gap-3 mb-2">
-          <BarChart3 size={32} className="text-emerald-600" />
-          التقارير المالية
-        </h2>
+        <div className="flex items-center justify-between gap-4 mb-2">
+          <div className="flex items-center gap-3">
+            <BarChart3 size={32} className="text-emerald-600" />
+            <h2 className="text-3xl sm:text-4xl font-black text-slate-800">
+              التقارير المالية
+            </h2>
+          </div>
+          {onCreateNewPeriod && (
+            <button
+              onClick={onCreateNewPeriod}
+              className="w-full sm:w-auto justify-center bg-emerald-600 text-white px-5 py-3 rounded-xl font-black hover:bg-emerald-700 transition-all shadow-lg flex items-center gap-2 active:scale-95"
+            >
+              <Plus size={20} />
+              إنشاء فترة محاسبية جديدة
+            </button>
+          )}
+        </div>
         <p className="text-slate-500 font-semibold">تحليل شامل للحركات المالية عبر الفترات الزمنية</p>
       </div>
 

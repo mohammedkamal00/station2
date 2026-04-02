@@ -1326,6 +1326,7 @@ export default function App() {
             onCompareFromMonthChange={setCompareFromMonth}
             onCompareToMonthChange={setCompareToMonth}
             onApplyFlexibleRange={applyFlexibleReportRange}
+            onCreateNewPeriod={handleCreateNewPeriod}
           />
         ) : (
           <>
@@ -1467,28 +1468,6 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {/* Opening Balance Row */}
-                  {!selectedPeriod && (
-                    <tr className="bg-slate-50/50 border-b border-slate-100 italic">
-                      <td className="p-2 border-l border-slate-200"></td>
-                      <td colSpan={5} className="p-2 text-left text-slate-400 text-xs font-bold border-l border-slate-200">رصيد افتتاحي (سابق)</td>
-                      <td className="p-2 bg-slate-100/50">
-                        <input 
-                          type="number" 
-                          value={(viewingArchive ? viewingArchive.openingBalance : openingBalance) || ''}
-                          placeholder="0.00"
-                          readOnly={!!viewingArchive}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
-                            setOpeningBalance(val);
-                            saveOpeningBalance(val);
-                          }}
-                          className={`w-full text-center bg-transparent border-none focus:ring-0 text-slate-800 font-black font-mono ${viewingArchive ? 'cursor-default' : ''}`}
-                        />
-                      </td>
-                    </tr>
-                  )}
-                  
                   <AnimatePresence initial={false}>
                     {currentViewEntries.map((entry, index) => (
                       <motion.tr 
