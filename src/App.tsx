@@ -1306,6 +1306,7 @@ export default function App() {
               setViewingArchive(period.fullData);
               setView('ledger');
             }}
+            onPrint={handlePrint}
           />
         ) : view === 'reports' ? (
           <ReportsPage
@@ -1327,6 +1328,7 @@ export default function App() {
             onCompareToMonthChange={setCompareToMonth}
             onApplyFlexibleRange={applyFlexibleReportRange}
             onCreateNewPeriod={handleCreateNewPeriod}
+            onPrint={handlePrint}
           />
         ) : (
           <>
@@ -1698,7 +1700,7 @@ export default function App() {
       {/* Global CSS for Print */}
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
-          @page { size: A4 portrait; margin: 12mm; }
+          @page { size: A4 landscape; margin: 10mm; }
 
           body {
             background: white !important;
@@ -1721,8 +1723,23 @@ export default function App() {
 
           /* Print only accounting period table + summary */
           #ledger-table,
-          #summary-section {
+          #summary-section,
+          #reports-table {
             display: block !important;
+          }
+
+          #reports-controls,
+          #reports-manual-range,
+          #reports-table button,
+          #reports-table input,
+          #reports-table [role="button"] {
+            display: none !important;
+          }
+
+          #reports-table,
+          #ledger-table {
+            break-inside: avoid;
+            page-break-inside: avoid;
           }
 
           #ledger-table {
@@ -1730,25 +1747,66 @@ export default function App() {
             border-radius: 0 !important;
           }
 
-          #ledger-table table {
-            width: 100% !important;
-            border-collapse: collapse !important;
-            table-layout: auto !important;
-            font-size: 11px !important;
+          #reports-table {
+            margin-bottom: 10mm !important;
+            border-radius: 0 !important;
           }
 
-          #ledger-table thead {
+          #ledger-table table,
+          #reports-table table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            table-layout: fixed !important;
+            font-size: 10px !important;
+          }
+
+          #ledger-table thead,
+          #reports-table thead {
             display: table-header-group;
           }
 
-          #ledger-table tfoot {
+          #ledger-table tfoot,
+          #reports-table tfoot {
             display: table-footer-group;
           }
 
           #ledger-table tr,
+          #reports-table tr,
           #summary-section .bg-white {
             break-inside: avoid;
             page-break-inside: avoid;
+          }
+
+          #ledger-table th, #ledger-table td,
+          #reports-table th, #reports-table td {
+            border: 1px solid #cbd5e1 !important;
+            padding: 4px 6px !important;
+            vertical-align: middle !important;
+            word-break: break-word !important;
+          }
+
+          #reports-table .overflow-x-auto,
+          #ledger-table .overflow-x-auto {
+            overflow: visible !important;
+            max-width: none !important;
+          }
+
+          #reports-table table {
+            min-width: 0 !important;
+          }
+
+          #ledger-table table {
+            min-width: 0 !important;
+          }
+
+          #reports-table th:nth-child(1), #reports-table td:nth-child(1) { width: 34% !important; }
+          #reports-table th:nth-child(2), #reports-table td:nth-child(2) { width: 22% !important; }
+          #reports-table th:nth-child(3), #reports-table td:nth-child(3) { width: 22% !important; }
+          #reports-table th:nth-child(4), #reports-table td:nth-child(4) { width: 22% !important; }
+
+          #ledger-table th,
+          #ledger-table td {
+            font-size: 9px !important;
           }
 
           input {

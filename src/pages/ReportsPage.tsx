@@ -6,7 +6,8 @@ import {
   TrendingDown,
   Zap,
   X,
-  Plus
+  Plus,
+  Printer
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -52,6 +53,7 @@ interface ReportsPageProps {
   onCompareToMonthChange: (value: string) => void;
   onApplyFlexibleRange: (months: number) => void;
   onCreateNewPeriod?: () => void;
+  onPrint?: () => void;
 }
 
 // دالة للحصول على تاريخ قبل عدد معين من الأشهر
@@ -102,6 +104,7 @@ export default function ReportsPage({
   onCompareToMonthChange,
   onApplyFlexibleRange,
   onCreateNewPeriod,
+  onPrint,
 }: ReportsPageProps) {
   const [showDetailTable, setShowDetailTable] = useState(false);
   const [activeQuickRange, setActiveQuickRange] = useState<number | string | null>(null);
@@ -162,15 +165,24 @@ export default function ReportsPage({
               التقارير المالية
             </h2>
           </div>
-          {onCreateNewPeriod && (
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            {onCreateNewPeriod && (
+              <button
+                onClick={onCreateNewPeriod}
+                className="w-full sm:w-auto justify-center bg-emerald-600 text-white px-5 py-3 rounded-xl font-black hover:bg-emerald-700 transition-all shadow-lg flex items-center gap-2 active:scale-95"
+              >
+                <Plus size={20} />
+                إنشاء فترة محاسبية جديدة
+              </button>
+            )}
             <button
-              onClick={onCreateNewPeriod}
-              className="w-full sm:w-auto justify-center bg-emerald-600 text-white px-5 py-3 rounded-xl font-black hover:bg-emerald-700 transition-all shadow-lg flex items-center gap-2 active:scale-95"
+              onClick={onPrint}
+              className="w-full sm:w-auto justify-center flex items-center gap-2 bg-white border border-slate-200 px-4 py-2.5 rounded-xl hover:bg-slate-50 transition-colors shadow-sm text-slate-700 font-bold text-sm"
             >
-              <Plus size={20} />
-              إنشاء فترة محاسبية جديدة
+              <Printer size={18} />
+              طباعة الكشف
             </button>
-          )}
+          </div>
         </div>
         <p className="text-slate-500 font-semibold">تحليل شامل للحركات المالية عبر الفترات الزمنية</p>
       </div>
@@ -180,6 +192,7 @@ export default function ReportsPage({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         className="bg-gradient-to-r from-emerald-50 to-blue-50 rounded-2xl border border-emerald-200 shadow-sm p-6 mb-6"
+        id="reports-controls"
       >
         <div className="flex items-center gap-2 mb-4">
           <Zap size={20} className="text-emerald-600" />
@@ -267,6 +280,7 @@ export default function ReportsPage({
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.1 }}
         className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6"
+        id="reports-manual-range"
       >
         <div className="flex items-center gap-2 mb-5">
           <Calendar size={20} className="text-slate-600" />
@@ -362,6 +376,7 @@ export default function ReportsPage({
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
           className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+          id="reports-table"
         >
           <div
             className="px-6 py-4 bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-200 flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors"
