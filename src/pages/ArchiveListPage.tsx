@@ -1,10 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Archive,
   Plus,
   Search,
   RotateCcw,
-  ArrowUpDown,
   ChevronFirst,
   ChevronLast,
   ChevronRight,
@@ -83,6 +82,41 @@ export default function ArchiveListPage({
   onOpenPeriod,
   onPrint,
 }: ArchiveListPageProps) {
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [selectedYear, setSelectedYear] = useState('');
+
+  const monthOptions = [
+    { value: '01', label: 'يناير' },
+    { value: '02', label: 'فبراير' },
+    { value: '03', label: 'مارس' },
+    { value: '04', label: 'أبريل' },
+    { value: '05', label: 'مايو' },
+    { value: '06', label: 'يونيو' },
+    { value: '07', label: 'يوليو' },
+    { value: '08', label: 'أغسطس' },
+    { value: '09', label: 'سبتمبر' },
+    { value: '10', label: 'أكتوبر' },
+    { value: '11', label: 'نوفمبر' },
+    { value: '12', label: 'ديسمبر' },
+  ];
+
+  const availableYears = useMemo(() => {
+    const years = new Set<string>();
+    archiveList.forEach((period) => {
+      if (period.startDate) years.add(period.startDate.slice(0, 4));
+      if (period.endDate) years.add(period.endDate.slice(0, 4));
+    });
+    return Array.from(years).sort((a, b) => Number(b) - Number(a));
+  }, [archiveList]);
+
+  const sortValue = useMemo(() => {
+    if (archiveSortField === 'date' && archiveSortDirection === 'desc') return 'newest';
+    if (archiveSortField === 'date' && archiveSortDirection === 'asc') return 'oldest';
+    if (archiveSortField === 'balance' && archiveSortDirection === 'desc') return 'balance-high';
+    if (archiveSortField === 'balance' && archiveSortDirection === 'asc') return 'balance-low';
+    return 'newest';
+  }, [archiveSortField, archiveSortDirection]);
+
   // Filter logic
   const filteredPeriods = useMemo(() => {
     let result = [...archiveList];
@@ -105,6 +139,15 @@ export default function ArchiveListPage({
       result = result.filter(p => p.endDate <= archiveToDate);
     }
 
+    // Month / Year filters
+    if (selectedMonth) {
+      result = result.filter((p) => p.startDate.slice(5, 7) === selectedMonth);
+    }
+
+    if (selectedYear) {
+      result = result.filter((p) => p.startDate.slice(0, 4) === selectedYear);
+    }
+
     // Min transactions
     if (archiveMinTransactions !== '') {
       result = result.filter(p => p.count >= Number(archiveMinTransactions));
@@ -125,7 +168,7 @@ export default function ArchiveListPage({
     });
 
     return result;
-  }, [archiveList, archiveSearch, archiveFromDate, archiveToDate, archiveMinTransactions, archiveSortField, archiveSortDirection]);
+  }, [archiveList, archiveSearch, archiveFromDate, archiveToDate, selectedMonth, selectedYear, archiveMinTransactions, archiveSortField, archiveSortDirection]);
 
   const paginatedPeriods = useMemo(() => {
     const startIndex = (archivePage - 1) * archiveRowsPerPage;
@@ -203,40 +246,124 @@ export default function ArchiveListPage({
       </div>
 
       {/* Search & Filter Bar */}
-      <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm mb-6 flex flex-wrap items-center gap-3 sm:gap-4">
-        <div className="flex-1 min-w-[160px] relative w-full sm:w-auto">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input 
-            type="text"
-            placeholder="بحث عن فترة (بالتاريخ)..."
-            value={archiveSearch}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pr-10 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-sm"
-          />
+      <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-sm mb-6 space-y-3 sm:space-y-4">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+          <div className="flex-1 min-w-[160px] relative w-full sm:w-auto">
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              type="text"
+              placeholder="بحث عن فترة (بالتاريخ)..."
+              value={archiveSearch}
+              onChange={(e) => {
+                onSearchChange(e.target.value);
+                onPageChange(1);
+              }}
+              className="w-full pr-10 pl-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-sm"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs font-bold text-slate-400">الشهر:</span>
+            <select
+              value={selectedMonth}
+              onChange={(e) => {
+                setSelectedMonth(e.target.value);
+                onPageChange(1);
+              }}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 min-w-[140px]"
+            >
+              <option value="">كل الشهور</option>
+              {monthOptions.map((month) => (
+                <option key={month.value} value={month.value}>{month.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs font-bold text-slate-400">السنة:</span>
+            <select
+              value={selectedYear}
+              onChange={(e) => {
+                setSelectedYear(e.target.value);
+                onPageChange(1);
+              }}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 min-w-[120px]"
+            >
+              <option value="">كل السنوات</option>
+              {availableYears.map((year) => (
+                <option key={year} value={year}>{year}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs font-bold text-slate-400">ترتيب حسب:</span>
+            <select
+              value={sortValue}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'newest') {
+                  onSortFieldChange('date');
+                  onSortDirectionChange('desc');
+                } else if (value === 'oldest') {
+                  onSortFieldChange('date');
+                  onSortDirectionChange('asc');
+                } else if (value === 'balance-high') {
+                  onSortFieldChange('balance');
+                  onSortDirectionChange('desc');
+                } else if (value === 'balance-low') {
+                  onSortFieldChange('balance');
+                  onSortDirectionChange('asc');
+                }
+                onPageChange(1);
+              }}
+              className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 min-w-[180px]"
+            >
+              <option value="newest">الأحدث أولاً</option>
+              <option value="oldest">الأقدم أولاً</option>
+              <option value="balance-high">الأعلى رصيداً</option>
+              <option value="balance-low">الأقل رصيداً</option>
+            </select>
+          </div>
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <span className="text-xs font-bold text-slate-400">من:</span>
-          <CustomDateInput 
-            value={archiveFromDate}
-            onChange={onFromDateChange}
-            className="bg-slate-50 w-full sm:w-48"
-          />
+
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs font-bold text-slate-400">من:</span>
+            <CustomDateInput 
+              value={archiveFromDate}
+              onChange={(value) => {
+                onFromDateChange(value);
+                onPageChange(1);
+              }}
+              className="bg-slate-50 w-full sm:w-48"
+            />
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs font-bold text-slate-400">إلى:</span>
+            <CustomDateInput 
+              value={archiveToDate}
+              onChange={(value) => {
+                onToDateChange(value);
+                onPageChange(1);
+              }}
+              className="bg-slate-50 w-full sm:w-48"
+            />
+          </div>
+
+          <button 
+            onClick={() => {
+              setSelectedMonth('');
+              setSelectedYear('');
+              onResetFilters();
+              onPageChange(1);
+            }}
+            className="p-2 text-slate-400 hover:text-rose-600 transition-colors"
+            title="إعادة تعيين الفلاتر"
+          >
+            <RotateCcw size={20} />
+          </button>
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <span className="text-xs font-bold text-slate-400">إلى:</span>
-          <CustomDateInput 
-            value={archiveToDate}
-            onChange={onToDateChange}
-            className="bg-slate-50 w-full sm:w-48"
-          />
-        </div>
-        <button 
-          onClick={onResetFilters}
-          className="p-2 text-slate-400 hover:text-rose-600 transition-colors"
-          title="إعادة تعيين الفلاتر"
-        >
-          <RotateCcw size={20} />
-        </button>
       </div>
 
       {/* Table Section */}
@@ -246,29 +373,15 @@ export default function ArchiveListPage({
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
                 <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider">#</th>
-                <th 
-                  className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider cursor-pointer hover:text-emerald-600 transition-colors"
-                  onClick={() => {
-                    if (archiveSortField === 'date') onSortDirectionChange(archiveSortDirection === 'asc' ? 'desc' : 'asc');
-                    else { onSortFieldChange('date'); onSortDirectionChange('asc'); }
-                  }}
-                >
+                <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider">
                   <div className="flex items-center gap-2">
                     تاريخ البداية
-                    <ArrowUpDown size={14} className={archiveSortField === 'date' ? 'text-emerald-600' : 'opacity-20'} />
                   </div>
                 </th>
                 <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider">تاريخ النهاية</th>
-                <th 
-                  className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider cursor-pointer hover:text-emerald-600 transition-colors text-center"
-                  onClick={() => {
-                    if (archiveSortField === 'balance') onSortDirectionChange(archiveSortDirection === 'asc' ? 'desc' : 'asc');
-                    else { onSortFieldChange('balance'); onSortDirectionChange('desc'); }
-                  }}
-                >
+                <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider text-center">
                   <div className="flex items-center justify-center gap-2">
                     رصيد الإغلاق
-                    <ArrowUpDown size={14} className={archiveSortField === 'balance' ? 'text-emerald-600' : 'opacity-20'} />
                   </div>
                 </th>
                 <th className="p-4 text-xs font-black text-slate-400 uppercase tracking-wider text-center">إجراء</th>
