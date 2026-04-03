@@ -1014,7 +1014,87 @@ export default function App() {
   };
 
   const handlePrint = () => {
+    const originalTitle = document.title;
+
+    const toSafeDate = (value: string) => {
+      if (!value) return '';
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [year, month, day] = value.split('-');
+        return `${day}-${month}-${year}`;
+      }
+
+      const slashMatch = value.match(/^(\d{1,2})\s*[\/-]\s*(\d{1,2})\s*[\/-]\s*(\d{4})$/);
+      if (slashMatch) {
+        const dd = slashMatch[1].padStart(2, '0');
+        const mm = slashMatch[2].padStart(2, '0');
+        const yyyy = slashMatch[3];
+        return `${dd}-${mm}-${yyyy}`;
+      }
+
+      return value.replace(/\//g, '-').trim();
+    };
+
+    const sanitizeFileName = (value: string) =>
+      value
+        .replace(/[\\/:*?"<>|]/g, '-')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+
+    const getPeriodRange = () => {
+      // الحالة الأهم: فترة مفتوحة من الأرشيف
+      if (viewingArchive) {
+        const entries = Array.isArray(viewingArchive.entries) ? viewingArchive.entries : [];
+        const datedEntries = entries
+          .map((e: any) => e?.date)
+          .filter((d: any): d is string => typeof d === 'string' && !!d)
+          .sort((a: string, b: string) => a.localeCompare(b));
+
+        const start = viewingArchive.startDate || datedEntries[0] || '';
+        const end = viewingArchive.endDate || datedEntries[datedEntries.length - 1] || '';
+        return { start, end, source: 'viewingArchive' };
+      }
+
+      if (selectedPeriod) {
+        const selected = periods.find((p) => p.key === selectedPeriod);
+        return {
+          start: selected?.startDate || '',
+          end: selected?.endDate || '',
+          source: 'selectedPeriod',
+        };
+      }
+
+      return {
+        start: currentPeriodDates[0] || '',
+        end: currentPeriodDates[currentPeriodDates.length - 1] || '',
+        source: 'currentPeriodDates',
+      };
+    };
+
+    const range = getPeriodRange();
+    const from = toSafeDate(range.start);
+    const to = toSafeDate(range.end);
+
+    if (!from || !to) {
+      console.warn('Print filename: period dates are missing from the active data source.', range);
+      window.print();
+      return;
+    }
+
+    const fileName = sanitizeFileName(`كشف-الفترة-من-${from}-إلى-${to}.pdf`);
+
+    document.title = fileName;
+
+    const restoreTitle = () => {
+      document.title = originalTitle;
+      window.removeEventListener('afterprint', restoreTitle);
+    };
+
+    window.addEventListener('afterprint', restoreTitle);
     window.print();
+
+    // Fallback for browsers that may skip afterprint
+    setTimeout(restoreTitle, 800);
   };
 
   const resetLedger = () => {
@@ -1332,6 +1412,23 @@ export default function App() {
           />
         ) : (
           <>
+            <div className="hidden" aria-hidden="true">
+              <span data-print-period-start>
+                {viewingArchive
+                  ? (viewingArchive.startDate || '')
+                  : (selectedPeriod
+                    ? (periods.find(p => p.key === selectedPeriod)?.startDate || '')
+                    : (currentPeriodDates[0] || ''))}
+              </span>
+              <span data-print-period-end>
+                {viewingArchive
+                  ? (viewingArchive.endDate || '')
+                  : (selectedPeriod
+                    ? (periods.find(p => p.key === selectedPeriod)?.endDate || '')
+                    : (currentPeriodDates[currentPeriodDates.length - 1] || ''))}
+              </span>
+            </div>
+
             {/* Header */}
             <header className="bg-white border-b border-slate-200 p-3 sm:p-4 md:p-6 sticky top-0 z-20 print:hidden">
               <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
