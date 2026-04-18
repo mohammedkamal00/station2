@@ -1467,7 +1467,7 @@ export default function App() {
                     ) : (
                       <p className="text-slate-500 font-medium flex items-center gap-2 mt-1">
                         <CalendarIcon size={16} />
-                        كشف حساب دوري (نصف شهر)
+                        كشف حساب دوري
                       </p>
                     ))}
                   </div>
