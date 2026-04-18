@@ -213,7 +213,6 @@ export default function App() {
 
   // Refresh data when navigating between views to ensure latest state
   useEffect(() => {
-    if (!user) return;
     if (view === 'ledger') {
       fetchEntries();
       fetchSettings();
@@ -222,7 +221,6 @@ export default function App() {
     }
   }, [view, user]);
 
-  // Initialize currentPeriodDates when selectedPeriod changes or on first load
   useEffect(() => {
     let startDate: string;
     let endDate: string;
@@ -727,32 +725,39 @@ export default function App() {
       });
     }
 
-    // Use the stable currentPeriodDates state
-    let periodDates = [...currentPeriodDates];
+    // Keep base period days and actual entry dates in one timeline.
+    const periodDates = [...currentPeriodDates];
+    const dateSet = new Set<string>(periodDates);
+    entriesWithBalance.forEach(entry => dateSet.add(entry.date));
+    const effectiveDates = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
 
-    // Map dates to existing entries or virtual ones
-    const entriesMap = new Map<string, BalanceEntry>();
-    entriesWithBalance.forEach(e => {
-      entriesMap.set(e.date, e);
+    // Group same-date entries to support allowed duplicate dates.
+    const entriesByDate = new Map<string, BalanceEntry[]>();
+    entriesWithBalance.forEach(entry => {
+      const bucket = entriesByDate.get(entry.date);
+      if (bucket) {
+        bucket.push(entry);
+      } else {
+        entriesByDate.set(entry.date, [entry]);
+      }
     });
     
     let lastBalance = openingBalance;
     // Find the balance before the earliest date in our current view
-    const earliestDate = periodDates.length > 0 ? periodDates.reduce((min, d) => d < min ? d : min, periodDates[0]) : '';
+    const earliestDate = effectiveDates.length > 0 ? effectiveDates[0] : '';
     
     const beforeEntries = entriesWithBalance.filter(e => e.date < earliestDate);
     if (beforeEntries.length > 0) {
       lastBalance = beforeEntries[beforeEntries.length - 1].balance;
     }
 
-    return periodDates.map((date, index) => {
-      const existing = entriesMap.get(date);
-      if (existing) {
-        lastBalance = existing.balance;
-        return { ...existing, id: existing.id };
-      } else {
-        // Virtual entry for days with no data
-        return {
+    const rows: BalanceEntry[] = [];
+
+    effectiveDates.forEach((date, index) => {
+      const entriesForDate = entriesByDate.get(date) || [];
+
+      if (entriesForDate.length === 0) {
+        rows.push({
           id: `virtual-${index}-${date}`,
           date,
           revenue: 0,
@@ -762,10 +767,35 @@ export default function App() {
           creditNote: 0,
           rowBalance: 0,
           balance: lastBalance
-        } as BalanceEntry;
+        } as BalanceEntry);
+        return;
       }
+
+      entriesForDate.forEach(existing => {
+        lastBalance = existing.balance;
+        rows.push({ ...existing, id: existing.id });
+      });
     });
+
+    return rows;
   }, [currentPeriodDates, entriesWithBalance, openingBalance]);
+
+  const duplicateMetaByRow = useMemo(() => {
+    const totalByDate = new Map<string, number>();
+    currentViewEntries.forEach(entry => {
+      totalByDate.set(entry.date, (totalByDate.get(entry.date) || 0) + 1);
+    });
+
+    const seenByDate = new Map<string, number>();
+    return currentViewEntries.map(entry => {
+      const order = (seenByDate.get(entry.date) || 0) + 1;
+      seenByDate.set(entry.date, order);
+      return {
+        order,
+        total: totalByDate.get(entry.date) || 1,
+      };
+    });
+  }, [currentViewEntries]);
 
   const totals = useMemo(() => {
     if (viewingArchive) {
@@ -813,7 +843,10 @@ export default function App() {
     if (oldDate === newDate) return;
 
     if (oldDate) {
-      setCurrentPeriodDates(prev => prev.map(d => d === oldDate ? newDate : d));
+      setCurrentPeriodDates(prev => {
+        const moved = prev.map(d => d === oldDate ? newDate : d);
+        return Array.from(new Set(moved)).sort((a, b) => a.localeCompare(b));
+      });
     }
     
     updateEntry(id, 'date', newDate);
@@ -823,7 +856,7 @@ export default function App() {
     if (!confirm('هل أنت متأكد من حذف هذا اليوم؟')) return;
 
     if (id.startsWith('virtual-')) {
-      const dateToDelete = id.split('-').pop();
+      const dateToDelete = id.split('-').slice(2).join('-'); // Extract date from virtual entry ID
       setCurrentPeriodDates(prev => prev.filter(d => d !== dateToDelete));
     } else {
       const entryToDelete = allEntries.find(e => e.id === id);
@@ -842,8 +875,9 @@ export default function App() {
   };
 
   const addNewDay = () => {
-    const lastDateStr = currentPeriodDates.length > 0 
-      ? currentPeriodDates[currentPeriodDates.length - 1] 
+    const allVisibleDates = currentViewEntries.map(entry => entry.date);
+    const lastDateStr = allVisibleDates.length > 0
+      ? [...allVisibleDates].sort((a, b) => a.localeCompare(b))[allVisibleDates.length - 1]
       : new Date().toISOString().split('T')[0];
     
     const lastDate = new Date(lastDateStr);
@@ -852,7 +886,7 @@ export default function App() {
     
     setCurrentPeriodDates(prev => {
       if (prev.includes(nextDate)) return prev;
-      return [...prev, nextDate];
+      return [...prev, nextDate].sort((a, b) => a.localeCompare(b));
     });
     
     // Scroll to bottom
@@ -1590,12 +1624,23 @@ export default function App() {
                               </button>
                             )}
                             <div className="relative flex-1 max-w-[280px] whitespace-nowrap">
-                              <CustomDateInput 
-                                value={entry.date}
-                                onChange={(newVal) => updateRowDate(entry.id, newVal)}
-                                className="border-none bg-transparent"
-                                disabled={!!viewingArchive}
-                              />
+                              <div className="flex items-center justify-center gap-2">
+                                <CustomDateInput 
+                                  value={entry.date}
+                                  onChange={(newVal) => updateRowDate(entry.id, newVal)}
+                                  className="border-none bg-transparent"
+                                  disabled={!!viewingArchive}
+                                />
+                                {duplicateMetaByRow[index]?.total > 1 && duplicateMetaByRow[index]?.order > 1 && (
+                                  <span
+                                    dir="ltr"
+                                    className="shrink-0 text-[10px] leading-none px-1.5 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-700 font-bold"
+                                    title="ترتيب السجل داخل نفس اليوم"
+                                  >
+                                    #{duplicateMetaByRow[index].order}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </td>
