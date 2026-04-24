@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { 
+import {
   BarChart3,
   Calendar,
-  TrendingUp,
   TrendingDown,
+  TrendingUp,
   Plus,
-  Printer
+  Printer,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { CustomDateInput } from '../components/CustomDateInput';
@@ -67,19 +67,10 @@ const formatFullDateDisplay = (dateStr: string): string => {
 export default function ReportsPage({
   reportFromDate,
   reportToDate,
-  isCompareEnabled,
-  compareFromDate,
-  compareToDate,
   reportRows,
   reportSummary,
-  compareRows,
-  compareSummary,
-  comparisonDelta,
   onFromDateChange,
   onToDateChange,
-  onCompareToggle,
-  onCompareFromDateChange,
-  onCompareToDateChange,
   onApplyFlexibleRange,
   onCreateNewPeriod,
   onPrint,
@@ -106,11 +97,6 @@ export default function ReportsPage({
     onToDateChange(toDate);
   };
 
-  const handleQuickRange = (range: 3 | 6 | 'year' | 'last-statement') => {
-    onApplyFlexibleRange(range);
-    setActiveQuickRange(range);
-  };
-
   const manualRangeError = useMemo(() => {
     if (!draftFromDate || !draftToDate) return null;
     if (draftToDate < draftFromDate) {
@@ -121,6 +107,11 @@ export default function ReportsPage({
 
   const hasDraftChanges = draftFromDate !== reportFromDate || draftToDate !== reportToDate;
   const canApplyFilter = !fromDateError && !toDateError && !manualRangeError && !!draftFromDate && !!draftToDate;
+
+  const handleQuickRange = (range: 3 | 6 | 'year' | 'last-statement') => {
+    onApplyFlexibleRange(range);
+    setActiveQuickRange(range);
+  };
 
   const handleManualFromChange = (value: string) => {
     setActiveQuickRange(null);
@@ -181,20 +172,22 @@ export default function ReportsPage({
     setToDateError(null);
   };
 
+  const coverageLabel = useMemo(() => {
+    if (reportRows.length <= 1) return 'ضمن الفترة المحددة';
+    return `يغطي ${reportRows.length} أشهر`;
+  }, [reportRows.length]);
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className="p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto"
     >
-      {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between gap-4 mb-2">
           <div className="flex items-center gap-3">
             <BarChart3 size={32} className="text-emerald-600" />
-            <h2 className="text-3xl sm:text-4xl font-black text-slate-800">
-              التقارير المالية
-            </h2>
+            <h2 className="text-3xl sm:text-4xl font-black text-slate-800">التقارير المالية</h2>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
             {onCreateNewPeriod && (
@@ -218,7 +211,6 @@ export default function ReportsPage({
         <p className="text-slate-500 font-semibold">تحليل شامل للحركات المالية عبر الفترات الزمنية</p>
       </div>
 
-      {/* Selected Period Display */}
       {reportFromDate && reportToDate && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -249,7 +241,6 @@ export default function ReportsPage({
         </motion.div>
       )}
 
-      {/* Manual Period Selection Card */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -349,67 +340,71 @@ export default function ReportsPage({
         </div>
       </motion.div>
 
-      {/* Results Cards */}
       {reportRows.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
-          className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"
+          className="mb-6"
         >
-          {/* Debit Card */}
-          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-2xl border border-emerald-200 p-6 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1">إجمالي المدين</p>
-                <h3 className="text-3xl font-black text-emerald-900 font-mono">
-                  {reportSummary.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </h3>
-              </div>
-              <div className="bg-emerald-600 rounded-full p-3 text-white">
-                <TrendingUp size={24} />
-              </div>
-            </div>
-            <p className="text-xs text-emerald-600 font-semibold">{reportRows.length} شهر</p>
+          <div className="mb-3 flex items-center justify-between gap-3 px-1">
+            <h3 className="text-sm sm:text-base font-black text-slate-800">ملخص الفترة المحددة ({reportRows.length} أشهر)</h3>
+            <span className="text-xs font-semibold text-slate-500">{coverageLabel}</span>
           </div>
 
-          {/* Credit Card */}
-          <div className="bg-gradient-to-br from-rose-50 to-rose-100 rounded-2xl border border-rose-200 p-6 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className="text-xs font-bold text-rose-600 uppercase tracking-wider mb-1">إجمالي الدائن</p>
-                <h3 className="text-3xl font-black text-rose-900 font-mono">
-                  {reportSummary.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </h3>
-              </div>
-              <div className="bg-rose-600 rounded-full p-3 text-white">
-                <TrendingDown size={24} />
+          <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-[1.4fr_1fr_1fr] gap-4">
+            <div className={`rounded-3xl border px-6 py-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${reportSummary.netBalance >= 0 ? 'bg-gradient-to-br from-blue-50 via-white to-blue-100 border-blue-200' : 'bg-gradient-to-br from-amber-50 via-white to-amber-100 border-amber-200'}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <p className={`text-[11px] font-black tracking-[0.18em] ${reportSummary.netBalance >= 0 ? 'text-blue-600' : 'text-amber-600'}`}>
+                      صافي الرصيد
+                    </p>
+                    <h3 className={`text-4xl sm:text-[2.7rem] font-black font-mono leading-none ${reportSummary.netBalance >= 0 ? 'text-blue-950' : 'text-amber-950'}`}>
+                      {reportSummary.netBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </h3>
+                  </div>
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-black ${reportSummary.netBalance >= 0 ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {reportSummary.netBalance >= 0 ? 'فائض' : 'عجز'}
+                  </span>
+                </div>
+                <div className={`rounded-2xl p-2 ${reportSummary.netBalance >= 0 ? 'bg-blue-600/10 text-blue-700' : 'bg-amber-600/10 text-amber-700'}`}>
+                  <BarChart3 size={18} />
+                </div>
               </div>
             </div>
-            <p className="text-xs text-rose-600 font-semibold">{reportRows.length} شهر</p>
-          </div>
 
-          {/* Net Balance Card */}
-          <div className={`bg-gradient-to-br ${reportSummary.netBalance >= 0 ? 'from-blue-50 to-blue-100 border-blue-200' : 'from-amber-50 to-amber-100 border-amber-200'} rounded-2xl border p-6 shadow-sm hover:shadow-md transition-shadow`}>
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className={`text-xs font-bold ${reportSummary.netBalance >= 0 ? 'text-blue-600' : 'text-amber-600'} uppercase tracking-wider mb-1`}>صافي الرصيد</p>
-                <h3 className={`text-3xl font-black font-mono ${reportSummary.netBalance >= 0 ? 'text-blue-900' : 'text-amber-900'}`}>
-                  {reportSummary.netBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </h3>
-              </div>
-              <div className={`rounded-full p-3 text-white ${reportSummary.netBalance >= 0 ? 'bg-blue-600' : 'bg-amber-600'}`}>
-                <BarChart3 size={24} />
+            <div className="rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-emerald-100 px-5 py-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+              <div className="flex items-start justify-between gap-4 mb-5">
+                <div className="space-y-2">
+                  <p className="text-[11px] font-black tracking-[0.16em] text-emerald-600">إجمالي المدين</p>
+                  <h3 className="text-3xl sm:text-[2rem] font-black text-emerald-950 font-mono leading-none">
+                    {reportSummary.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </h3>
+                </div>
+                <div className="rounded-2xl p-2 bg-emerald-600/10 text-emerald-700">
+                  <TrendingUp size={16} />
+                </div>
               </div>
             </div>
-            <p className={`text-xs font-semibold ${reportSummary.netBalance >= 0 ? 'text-blue-600' : 'text-amber-600'}`}>
-              {reportSummary.netBalance >= 0 ? 'فائض' : 'عجز'}
-            </p>
+
+            <div className="rounded-3xl border border-rose-200 bg-gradient-to-br from-rose-50 via-white to-rose-100 px-5 py-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
+              <div className="flex items-start justify-between gap-4 mb-5">
+                <div className="space-y-2">
+                  <p className="text-[11px] font-black tracking-[0.16em] text-rose-600">إجمالي الدائن</p>
+                  <h3 className="text-3xl sm:text-[2rem] font-black text-rose-950 font-mono leading-none">
+                    {reportSummary.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </h3>
+                </div>
+                <div className="rounded-2xl p-2 bg-rose-600/10 text-rose-700">
+                  <TrendingDown size={16} />
+                </div>
+              </div>
+            </div>
           </div>
         </motion.div>
       )}
 
-      {/* Detailed Table Section */}
       {reportRows.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -445,9 +440,7 @@ export default function ReportsPage({
                   {reportRows.map((row, index) => (
                     <tr
                       key={row.monthKey}
-                      className={`border-b border-slate-100 hover:bg-slate-50/50 transition-colors ${
-                        index % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'
-                      }`}
+                      className={`border-b border-slate-100 hover:bg-slate-50/50 transition-colors ${index % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}
                     >
                       <td className="px-6 py-4 font-bold text-slate-700">{row.label}</td>
                       <td className="px-6 py-4 font-mono font-bold text-emerald-700">
@@ -468,7 +461,6 @@ export default function ReportsPage({
         </motion.div>
       )}
 
-      {/* Empty State */}
       {reportRows.length === 0 && (
         <motion.div
           initial={{ opacity: 0 }}
