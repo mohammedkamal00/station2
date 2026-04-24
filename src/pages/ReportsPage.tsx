@@ -1,15 +1,14 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { 
   BarChart3,
   Calendar,
   TrendingUp,
   TrendingDown,
-  Zap,
-  X,
   Plus,
   Printer
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { CustomDateInput } from '../components/CustomDateInput';
 
 interface ReportRow {
   monthKey: string;
@@ -35,119 +34,151 @@ interface ComparisonDelta {
 }
 
 interface ReportsPageProps {
-  reportFromMonth: string;
-  reportToMonth: string;
+  reportFromDate: string;
+  reportToDate: string;
   isCompareEnabled: boolean;
-  compareFromMonth: string;
-  compareToMonth: string;
+  compareFromDate: string;
+  compareToDate: string;
   reportRows: ReportRow[];
   reportSummary: ReportSummary;
   compareRows: ReportRow[];
   compareSummary: ReportSummary;
   comparisonDelta: ComparisonDelta;
-  uniqueArchiveMonths: string[];
-  onFromMonthChange: (value: string) => void;
-  onToMonthChange: (value: string) => void;
+  onFromDateChange: (value: string) => void;
+  onToDateChange: (value: string) => void;
   onCompareToggle: () => void;
-  onCompareFromMonthChange: (value: string) => void;
-  onCompareToMonthChange: (value: string) => void;
-  onApplyFlexibleRange: (months: number) => void;
+  onCompareFromDateChange: (value: string) => void;
+  onCompareToDateChange: (value: string) => void;
+  onApplyFlexibleRange: (range: number | 'year' | 'last-statement') => void;
   onCreateNewPeriod?: () => void;
   onPrint?: () => void;
 }
 
-// دالة للحصول على تاريخ قبل عدد معين من الأشهر
-const getMonthBefore = (fromDate: string, monthsBack: number): string => {
-  const [year, month] = fromDate.split('-').map(Number);
-  let newYear = year;
-  let newMonth = month - monthsBack;
-  
-  while (newMonth <= 0) {
-    newMonth += 12;
-    newYear -= 1;
-  }
-  
-  return `${newYear}-${String(newMonth).padStart(2, '0')}`;
-};
-
-// دالة لتنسيق الشهر واللسان بصيغة عربية
-const formatMonthDisplay = (dateStr: string): string => {
+const formatFullDateDisplay = (dateStr: string): string => {
   if (!dateStr) return '';
-  const [year, month] = dateStr.split('-');
-  const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-                      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
-  return `${monthNames[parseInt(month) - 1]} ${year}`;
-};
-
-// دالة للحصول على أول شهر من السنة الحالية
-const getFirstMonthOfYear = (fromDate: string): string => {
-  const [year] = fromDate.split('-');
-  return `${year}-01`;
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString('ar-EG', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 };
 
 export default function ReportsPage({
-  reportFromMonth,
-  reportToMonth,
+  reportFromDate,
+  reportToDate,
   isCompareEnabled,
-  compareFromMonth,
-  compareToMonth,
+  compareFromDate,
+  compareToDate,
   reportRows,
   reportSummary,
   compareRows,
   compareSummary,
   comparisonDelta,
-  uniqueArchiveMonths,
-  onFromMonthChange,
-  onToMonthChange,
+  onFromDateChange,
+  onToDateChange,
   onCompareToggle,
-  onCompareFromMonthChange,
-  onCompareToMonthChange,
+  onCompareFromDateChange,
+  onCompareToDateChange,
   onApplyFlexibleRange,
   onCreateNewPeriod,
   onPrint,
 }: ReportsPageProps) {
   const [showDetailTable, setShowDetailTable] = useState(false);
-  const [activeQuickRange, setActiveQuickRange] = useState<number | string | null>(null);
+  const [activeQuickRange, setActiveQuickRange] = useState<'this-month' | 'prev-month' | 3 | 6 | 'year' | 'last-statement' | null>(null);
+  const [fromDateError, setFromDateError] = useState<string | null>(null);
+  const [toDateError, setToDateError] = useState<string | null>(null);
+  const [draftFromDate, setDraftFromDate] = useState(reportFromDate);
+  const [draftToDate, setDraftToDate] = useState(reportToDate);
+  const manualSectionRef = useRef<HTMLDivElement>(null);
 
-  // الحصول على آخر شهر متاح
-  const latestMonth = useMemo(() => {
-    return uniqueArchiveMonths.length > 0 ? uniqueArchiveMonths[uniqueArchiveMonths.length - 1] : '';
-  }, [uniqueArchiveMonths]);
+  useEffect(() => {
+    setDraftFromDate(reportFromDate);
+    setDraftToDate(reportToDate);
+  }, [reportFromDate, reportToDate]);
 
-  // دوال الأزرار السريعة
-  const handleQuickRange = (months: number | 'year') => {
-    if (!latestMonth) return;
-    
-    const toMonth = latestMonth;
-    let fromMonth: string;
-    
-    if (months === 'year') {
-      fromMonth = getFirstMonthOfYear(toMonth);
-      setActiveQuickRange('year');
-    } else {
-      fromMonth = getMonthBefore(toMonth, months - 1);
-      setActiveQuickRange(months);
-    }
-    
-    onToMonthChange(toMonth);
-    onFromMonthChange(fromMonth);
+  const toIsoDate = (date: Date) => {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   };
 
-  // مسح الاختيار السريع عند تغيير يدوي
+  const applyDraftRange = (fromDate: string, toDate: string) => {
+    onFromDateChange(fromDate);
+    onToDateChange(toDate);
+  };
+
+  const handleQuickRange = (range: 3 | 6 | 'year' | 'last-statement') => {
+    onApplyFlexibleRange(range);
+    setActiveQuickRange(range);
+  };
+
+  const manualRangeError = useMemo(() => {
+    if (!draftFromDate || !draftToDate) return null;
+    if (draftToDate < draftFromDate) {
+      return 'تاريخ النهاية يجب أن يكون بعد أو يساوي تاريخ البداية';
+    }
+    return null;
+  }, [draftFromDate, draftToDate]);
+
+  const hasDraftChanges = draftFromDate !== reportFromDate || draftToDate !== reportToDate;
+  const canApplyFilter = !fromDateError && !toDateError && !manualRangeError && !!draftFromDate && !!draftToDate;
+
   const handleManualFromChange = (value: string) => {
     setActiveQuickRange(null);
-    onFromMonthChange(value);
+    setDraftFromDate(value);
   };
 
   const handleManualToChange = (value: string) => {
     setActiveQuickRange(null);
-    onToMonthChange(value);
+    setDraftToDate(value);
+  };
+
+  const handleApplyFilter = () => {
+    if (!canApplyFilter) return;
+    applyDraftRange(draftFromDate, draftToDate);
+  };
+
+  const applyFinancialPreset = (preset: 'this-month' | 'prev-month' | 3 | 6 | 'year' | 'last-statement') => {
+    if (preset === 3 || preset === 6 || preset === 'year' || preset === 'last-statement') {
+      handleQuickRange(preset);
+      return;
+    }
+
+    const today = new Date();
+    let fromDate = '';
+    let toDate = '';
+
+    if (preset === 'this-month') {
+      const first = new Date(today.getFullYear(), today.getMonth(), 1);
+      const last = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      fromDate = toIsoDate(first);
+      toDate = toIsoDate(last);
+    } else {
+      const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const last = new Date(today.getFullYear(), today.getMonth(), 0);
+      fromDate = toIsoDate(first);
+      toDate = toIsoDate(last);
+    }
+
+    setActiveQuickRange(preset);
+    setDraftFromDate(fromDate);
+    setDraftToDate(toDate);
+    applyDraftRange(fromDate, toDate);
+  };
+
+  const handleEditSelection = () => {
+    manualSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const input = manualSectionRef.current?.querySelector('input[type="text"]') as HTMLInputElement | null;
+    input?.focus();
   };
 
   const clearSelection = () => {
     setActiveQuickRange(null);
-    onFromMonthChange('');
-    onToMonthChange('');
+    setDraftFromDate('');
+    setDraftToDate('');
+    onFromDateChange('');
+    onToDateChange('');
+    setFromDateError(null);
+    setToDateError(null);
   };
 
   return (
@@ -187,90 +218,34 @@ export default function ReportsPage({
         <p className="text-slate-500 font-semibold">تحليل شامل للحركات المالية عبر الفترات الزمنية</p>
       </div>
 
-      {/* Quick Range Buttons */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="bg-gradient-to-r from-emerald-50 to-blue-50 rounded-2xl border border-emerald-200 shadow-sm p-6 mb-6"
-        id="reports-controls"
-      >
-        <div className="flex items-center gap-2 mb-4">
-          <Zap size={20} className="text-emerald-600" />
-          <h3 className="text-lg font-black text-slate-800">اختر الفترة بسرعة</h3>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <button
-            onClick={() => handleQuickRange(3)}
-            className={`px-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${
-              activeQuickRange === 3
-                ? 'bg-blue-600 text-white shadow-lg border-2 border-blue-700'
-                : 'bg-white text-blue-700 border-2 border-blue-200 hover:shadow-md hover:border-blue-300'
-            }`}
-          >
-            <Zap size={16} />
-            آخر 3 شهور
-          </button>
-          <button
-            onClick={() => handleQuickRange(6)}
-            className={`px-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${
-              activeQuickRange === 6
-                ? 'bg-purple-600 text-white shadow-lg border-2 border-purple-700'
-                : 'bg-white text-purple-700 border-2 border-purple-200 hover:shadow-md hover:border-purple-300'
-            }`}
-          >
-            <Zap size={16} />
-            آخر 6 شهور
-          </button>
-          <button
-            onClick={() => handleQuickRange(12)}
-            className={`px-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${
-              activeQuickRange === 12
-                ? 'bg-orange-600 text-white shadow-lg border-2 border-orange-700'
-                : 'bg-white text-orange-700 border-2 border-orange-200 hover:shadow-md hover:border-orange-300'
-            }`}
-          >
-            <Zap size={16} />
-            آخر 12 شهر
-          </button>
-          <button
-            onClick={() => handleQuickRange('year')}
-            className={`px-4 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 flex items-center justify-center gap-2 ${
-              activeQuickRange === 'year'
-                ? 'bg-emerald-600 text-white shadow-lg border-2 border-emerald-700'
-                : 'bg-white text-emerald-700 border-2 border-emerald-200 hover:shadow-md hover:border-emerald-300'
-            }`}
-          >
-            <Calendar size={16} />
-            من بداية السنة
-          </button>
-        </div>
-      </motion.div>
-
       {/* Selected Period Display */}
-      {(reportFromMonth || reportToMonth) && (
+      {reportFromDate && reportToDate && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white rounded-2xl border-2 border-emerald-200 p-4 mb-6 flex items-center justify-between"
+          className="bg-white rounded-xl border border-emerald-200 px-4 py-3 mb-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
         >
-          <div className="flex items-center gap-3">
-            <Calendar size={20} className="text-emerald-600" />
-            <div>
-              <p className="text-xs font-bold text-slate-400 uppercase">الفترة المختارة</p>
-              <p className="text-lg font-black text-slate-800">
-                من <span className="text-emerald-600">{formatMonthDisplay(reportFromMonth)}</span> إلى{' '}
-                <span className="text-emerald-600">{formatMonthDisplay(reportToMonth)}</span>
-              </p>
-            </div>
+          <div className="flex items-center gap-2.5">
+            <Calendar size={18} className="text-emerald-600" />
+            <p className="text-sm sm:text-base font-black text-slate-800">
+              الفترة المختارة: من <span className="text-emerald-600">{formatFullDateDisplay(reportFromDate)}</span> إلى{' '}
+              <span className="text-emerald-600">{formatFullDateDisplay(reportToDate)}</span>
+            </p>
           </div>
-          <button
-            onClick={clearSelection}
-            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-            title="مسح الاختيار"
-          >
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleEditSelection}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs font-black hover:bg-slate-50 transition-colors"
+            >
+              تعديل
+            </button>
+            <button
+              onClick={clearSelection}
+              className="px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-xs font-black hover:bg-rose-100 transition-colors"
+            >
+              مسح
+            </button>
+          </div>
         </motion.div>
       )}
 
@@ -281,31 +256,96 @@ export default function ReportsPage({
         transition={{ delay: 0.1 }}
         className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 mb-6"
         id="reports-manual-range"
+        ref={manualSectionRef}
       >
         <div className="flex items-center gap-2 mb-5">
           <Calendar size={20} className="text-slate-600" />
           <h3 className="text-lg font-black text-slate-800">اختر الفترة يدويًا</h3>
         </div>
 
+        <p className="text-sm text-slate-500 font-semibold mb-5">اختر التاريخ أو اكتبه يدويًا</p>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-bold text-slate-600 mb-2">من (الشهر/السنة)</label>
-            <input
-              type="month"
-              value={reportFromMonth}
-              onChange={(e) => handleManualFromChange(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+            <label className="block text-sm font-bold text-slate-600 mb-2">من تاريخ</label>
+            <CustomDateInput
+              value={draftFromDate}
+              onChange={handleManualFromChange}
+              onValidationChange={setFromDateError}
+              errorMessage={fromDateError ?? undefined}
+              placeholder="اختر التاريخ أو اكتبه يدويًا"
+              className="w-full"
             />
           </div>
           <div>
-            <label className="block text-sm font-bold text-slate-600 mb-2">إلى (الشهر/السنة)</label>
-            <input
-              type="month"
-              value={reportToMonth}
-              onChange={(e) => handleManualToChange(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all"
+            <label className="block text-sm font-bold text-slate-600 mb-2">إلى تاريخ</label>
+            <CustomDateInput
+              value={draftToDate}
+              onChange={handleManualToChange}
+              onValidationChange={setToDateError}
+              errorMessage={toDateError ?? undefined}
+              placeholder="اختر التاريخ أو اكتبه يدويًا"
+              className="w-full"
             />
           </div>
+        </div>
+
+        {manualRangeError && (
+          <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700">
+            {manualRangeError}
+          </div>
+        )}
+
+        <div className="mt-5">
+          <p className="text-sm font-black text-slate-700 mb-3">اختصارات سريعة</p>
+          <div className="flex flex-wrap items-center gap-3.5">
+            <button
+              onClick={() => applyFinancialPreset('this-month')}
+              className={`h-10 px-5 rounded-2xl text-xs font-black border shadow-[0_1px_2px_rgba(15,23,42,0.05)] cursor-pointer transition-all duration-200 ${activeQuickRange === 'this-month' ? 'bg-emerald-600 border-emerald-600 text-white shadow-[0_4px_12px_rgba(5,150,105,0.25)]' : 'bg-white text-slate-700 border-slate-300 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)]'}`}
+            >
+              هذا الشهر
+            </button>
+            <button
+              onClick={() => applyFinancialPreset('prev-month')}
+              className={`h-10 px-5 rounded-2xl text-xs font-black border shadow-[0_1px_2px_rgba(15,23,42,0.05)] cursor-pointer transition-all duration-200 ${activeQuickRange === 'prev-month' ? 'bg-emerald-600 border-emerald-600 text-white shadow-[0_4px_12px_rgba(5,150,105,0.25)]' : 'bg-white text-slate-700 border-slate-300 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)]'}`}
+            >
+              الشهر الماضي
+            </button>
+            <button
+              onClick={() => applyFinancialPreset(3)}
+              className={`h-10 px-5 rounded-2xl text-xs font-black border shadow-[0_1px_2px_rgba(15,23,42,0.05)] cursor-pointer transition-all duration-200 ${activeQuickRange === 3 ? 'bg-emerald-600 border-emerald-600 text-white shadow-[0_4px_12px_rgba(5,150,105,0.25)]' : 'bg-white text-slate-700 border-slate-300 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)]'}`}
+            >
+              آخر 3 أشهر
+            </button>
+            <button
+              onClick={() => applyFinancialPreset(6)}
+              className={`h-10 px-5 rounded-2xl text-xs font-black border shadow-[0_1px_2px_rgba(15,23,42,0.05)] cursor-pointer transition-all duration-200 ${activeQuickRange === 6 ? 'bg-emerald-600 border-emerald-600 text-white shadow-[0_4px_12px_rgba(5,150,105,0.25)]' : 'bg-white text-slate-700 border-slate-300 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)]'}`}
+            >
+              آخر 6 أشهر
+            </button>
+            <button
+              onClick={() => applyFinancialPreset('year')}
+              className={`h-10 px-5 rounded-2xl text-xs font-black border shadow-[0_1px_2px_rgba(15,23,42,0.05)] cursor-pointer transition-all duration-200 ${activeQuickRange === 'year' ? 'bg-emerald-600 border-emerald-600 text-white shadow-[0_4px_12px_rgba(5,150,105,0.25)]' : 'bg-white text-slate-700 border-slate-300 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)]'}`}
+            >
+              من بداية السنة
+            </button>
+            <button
+              onClick={() => applyFinancialPreset('last-statement')}
+              className={`h-10 px-5 rounded-2xl text-xs font-black border shadow-[0_1px_2px_rgba(15,23,42,0.05)] cursor-pointer transition-all duration-200 ${activeQuickRange === 'last-statement' ? 'bg-emerald-600 border-emerald-600 text-white shadow-[0_4px_12px_rgba(5,150,105,0.25)]' : 'bg-white text-slate-700 border-slate-300 hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 hover:shadow-[0_4px_12px_rgba(15,23,42,0.08)]'}`}
+            >
+              آخر كشف
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 flex items-center justify-stretch sm:justify-end">
+          <button
+            onClick={handleApplyFilter}
+            disabled={!canApplyFilter || (!hasDraftChanges && !manualRangeError)}
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-black text-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+          >
+            تطبيق الفلترة
+          </button>
         </div>
       </motion.div>
 
@@ -438,7 +478,7 @@ export default function ReportsPage({
           <div className="flex justify-center mb-4">
             <BarChart3 size={48} className="text-slate-300" />
           </div>
-          <p className="text-slate-500 font-bold text-lg">لا توجد بيانات للفترة المختارة</p>
+          <p className="text-slate-500 font-bold text-lg">لا توجد بيانات ضمن الفترة المحددة</p>
           <p className="text-slate-400 text-sm mt-2">اختر فترة زمنية مختلفة أو استخدم الأزرار السريعة</p>
         </motion.div>
       )}

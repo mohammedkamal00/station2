@@ -60,6 +60,7 @@ import {
   getNextPeriod,
   getFirstPeriod,
   getPeriodInfo,
+  formatDateToISO,
   generateDatesForPeriod,
   createEmptyEntry,
   type PeriodInfo,
@@ -122,11 +123,11 @@ export default function App() {
   const [archiveRowsPerPage, setArchiveRowsPerPage] = useState(10);
   const [archiveSortField, setArchiveSortField] = useState<'date' | 'count' | 'balance'>('date');
   const [archiveSortDirection, setArchiveSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [reportFromMonth, setReportFromMonth] = useState('');
-  const [reportToMonth, setReportToMonth] = useState('');
+  const [reportFromDate, setReportFromDate] = useState('');
+  const [reportToDate, setReportToDate] = useState('');
   const [isCompareEnabled, setIsCompareEnabled] = useState(false);
-  const [compareFromMonth, setCompareFromMonth] = useState('');
-  const [compareToMonth, setCompareToMonth] = useState('');
+  const [compareFromDate, setCompareFromDate] = useState('');
+  const [compareToDate, setCompareToDate] = useState('');
   const [lastAddedId, setLastAddedId] = useState<string | null>(null);
   const [currentPeriodDates, setCurrentPeriodDates] = useState<string[]>([]);
   const [currentPeriodMeta, setCurrentPeriodMeta] = useState<CurrentPeriodMeta | null>(null);
@@ -545,69 +546,90 @@ export default function App() {
     return (year * 100) + month;
   };
 
-  const uniqueArchiveMonths = useMemo(() => {
-    const unique = new Set(archiveList.map(a => a.monthKey).filter(Boolean));
-    return Array.from(unique).sort((a, b) => monthNumber(a) - monthNumber(b));
+  const shiftToMonthStart = (dateStr: string, monthsBack: number) => {
+    const [year, month] = dateStr.split('-').map(Number);
+    return formatDateToISO(new Date(year, month - 1 - monthsBack, 1));
+  };
+
+  const shiftYear = (dateStr: string, yearsBack: number) => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return formatDateToISO(new Date(year - yearsBack, month - 1, day));
+  };
+
+  const startOfYear = (dateStr: string) => {
+    const [year] = dateStr.split('-');
+    return `${year}-01-01`;
+  };
+
+  const archiveDateBounds = useMemo(() => {
+    if (archiveList.length === 0) {
+      return { earliest: '', latest: '' };
+    }
+
+    const earliest = archiveList.reduce((min, period) => {
+      if (!min) return period.startDate;
+      return period.startDate < min ? period.startDate : min;
+    }, '');
+
+    const latest = archiveList.reduce((max, period) => {
+      if (!max) return period.endDate;
+      return period.endDate > max ? period.endDate : max;
+    }, '');
+
+    return { earliest, latest };
   }, [archiveList]);
 
   useEffect(() => {
-    if (uniqueArchiveMonths.length === 0) return;
+    if (!archiveDateBounds.latest) return;
 
-    const lastMonth = uniqueArchiveMonths[uniqueArchiveMonths.length - 1];
-    const fromIndex = Math.max(0, uniqueArchiveMonths.length - 6);
-    const defaultFrom = uniqueArchiveMonths[fromIndex];
+    const defaultTo = archiveDateBounds.latest;
+    const defaultFrom = shiftToMonthStart(defaultTo, 5);
 
-    if (!reportFromMonth) setReportFromMonth(defaultFrom);
-    if (!reportToMonth) setReportToMonth(lastMonth);
+    if (!reportFromDate) setReportFromDate(defaultFrom);
+    if (!reportToDate) setReportToDate(defaultTo);
 
-    if (!compareFromMonth || !compareToMonth) {
-      const [toYear, toMonth] = (reportToMonth || lastMonth).split('-').map(Number);
-      const [fromYear, fromMonth] = (reportFromMonth || defaultFrom).split('-').map(Number);
-
-      const safeToYear = Number.isFinite(toYear) ? toYear : new Date().getFullYear();
-      const safeToMonth = Number.isFinite(toMonth) ? toMonth : 1;
-      const safeFromYear = Number.isFinite(fromYear) ? fromYear : safeToYear;
-      const safeFromMonth = Number.isFinite(fromMonth) ? fromMonth : safeToMonth;
-
-      setCompareFromMonth(`${safeFromYear - 1}-${String(safeFromMonth).padStart(2, '0')}`);
-      setCompareToMonth(`${safeToYear - 1}-${String(safeToMonth).padStart(2, '0')}`);
+    if (!compareFromDate || !compareToDate) {
+      setCompareFromDate(shiftYear(reportFromDate || defaultFrom, 1));
+      setCompareToDate(shiftYear(reportToDate || defaultTo, 1));
     }
-  }, [uniqueArchiveMonths, reportFromMonth, reportToMonth, compareFromMonth, compareToMonth]);
+  }, [archiveDateBounds, reportFromDate, reportToDate, compareFromDate, compareToDate]);
 
-  const buildReportRows = (fromMonth: string, toMonth: string) => {
-    if (!fromMonth || !toMonth) return [] as Array<{ monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>;
-
-    const fromNum = monthNumber(fromMonth);
-    const toNum = monthNumber(toMonth);
-    if (!fromNum || !toNum) return [];
-
-    const rangeStart = Math.min(fromNum, toNum);
-    const rangeEnd = Math.max(fromNum, toNum);
+  const buildReportRows = (fromDate: string, toDate: string) => {
+    if (!fromDate || !toDate || toDate < fromDate) {
+      return [] as Array<{ monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>;
+    }
 
     const grouped = new Map<string, { monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>();
 
     archiveList.forEach(period => {
-      const currentNum = monthNumber(period.monthKey);
-      if (currentNum < rangeStart || currentNum > rangeEnd) return;
+      if (period.endDate < fromDate || period.startDate > toDate) return;
 
-      const existing = grouped.get(period.monthKey) || {
-        monthKey: period.monthKey,
-        label: monthLabel(period.monthKey),
-        totalDebit: 0,
-        totalCredit: 0,
-        net: 0,
-      };
+      period.entries.forEach(entry => {
+        if (!entry?.date || entry.date < fromDate || entry.date > toDate) return;
 
-      existing.totalDebit += Number(period.totalDebit) || 0;
-      existing.totalCredit += Number(period.totalCredit) || 0;
-      existing.net = existing.totalDebit - existing.totalCredit;
-      grouped.set(period.monthKey, existing);
+        const monthKey = entry.date.slice(0, 7);
+        const existing = grouped.get(monthKey) || {
+          monthKey,
+          label: monthLabel(monthKey),
+          totalDebit: 0,
+          totalCredit: 0,
+          net: 0,
+        };
+
+        const rowDebit = (Number(entry.revenue) || 0) + (Number(entry.coupons) || 0) + (Number(entry.debitNote) || 0);
+        const rowCredit = (Number(entry.invoices) || 0) + (Number(entry.creditNote) || 0);
+
+        existing.totalDebit += rowDebit;
+        existing.totalCredit += rowCredit;
+        existing.net = existing.totalDebit - existing.totalCredit;
+        grouped.set(monthKey, existing);
+      });
     });
 
     return Array.from(grouped.values()).sort((a, b) => monthNumber(a.monthKey) - monthNumber(b.monthKey));
   };
 
-  const reportRows = useMemo(() => buildReportRows(reportFromMonth, reportToMonth), [archiveList, reportFromMonth, reportToMonth]);
+  const reportRows = useMemo(() => buildReportRows(reportFromDate, reportToDate), [archiveList, reportFromDate, reportToDate]);
 
   const reportSummary = useMemo(() => {
     const totalDebit = reportRows.reduce((sum, row) => sum + row.totalDebit, 0);
@@ -618,8 +640,8 @@ export default function App() {
 
   const compareRows = useMemo(() => {
     if (!isCompareEnabled) return [] as Array<{ monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>;
-    return buildReportRows(compareFromMonth, compareToMonth);
-  }, [archiveList, isCompareEnabled, compareFromMonth, compareToMonth]);
+    return buildReportRows(compareFromDate, compareToDate);
+  }, [archiveList, isCompareEnabled, compareFromDate, compareToDate]);
 
   const compareSummary = useMemo(() => {
     const totalDebit = compareRows.reduce((sum, row) => sum + row.totalDebit, 0);
@@ -1152,15 +1174,33 @@ export default function App() {
     }
   };
 
-  const applyFlexibleReportRange = (monthsCount: number) => {
-    if (uniqueArchiveMonths.length === 0) return;
+  const applyFlexibleReportRange = (range: number | 'year' | 'last-statement') => {
+    if (!archiveDateBounds.latest) return;
 
-    const targetTo = reportToMonth || uniqueArchiveMonths[uniqueArchiveMonths.length - 1];
-    const toIndex = Math.max(0, uniqueArchiveMonths.indexOf(targetTo));
-    const fromIndex = Math.max(0, toIndex - monthsCount + 1);
+    if (range === 'last-statement') {
+      const latestPeriod = archiveList.reduce<{ startDate: string; endDate: string } | null>((latest, period) => {
+        if (!latest) {
+          return { startDate: period.startDate, endDate: period.endDate };
+        }
+        if (period.endDate > latest.endDate) {
+          return { startDate: period.startDate, endDate: period.endDate };
+        }
+        return latest;
+      }, null);
 
-    setReportFromMonth(uniqueArchiveMonths[fromIndex]);
-    setReportToMonth(uniqueArchiveMonths[toIndex]);
+      if (!latestPeriod) return;
+      setReportFromDate(latestPeriod.startDate);
+      setReportToDate(latestPeriod.endDate);
+      return;
+    }
+
+    const targetTo = archiveDateBounds.latest;
+    const nextFrom = range === 'year'
+      ? startOfYear(targetTo)
+      : shiftToMonthStart(targetTo, range - 1);
+
+    setReportFromDate(nextFrom);
+    setReportToDate(targetTo);
   };
 
   const handleShowReport = () => {
@@ -1424,22 +1464,21 @@ export default function App() {
           />
         ) : view === 'reports' ? (
           <ReportsPage
-            reportFromMonth={reportFromMonth}
-            reportToMonth={reportToMonth}
+            reportFromDate={reportFromDate}
+            reportToDate={reportToDate}
             isCompareEnabled={isCompareEnabled}
-            compareFromMonth={compareFromMonth}
-            compareToMonth={compareToMonth}
+            compareFromDate={compareFromDate}
+            compareToDate={compareToDate}
             reportRows={reportRows}
             reportSummary={reportSummary}
             compareRows={compareRows}
             compareSummary={compareSummary}
             comparisonDelta={comparisonDelta}
-            uniqueArchiveMonths={uniqueArchiveMonths}
-            onFromMonthChange={setReportFromMonth}
-            onToMonthChange={setReportToMonth}
+            onFromDateChange={setReportFromDate}
+            onToDateChange={setReportToDate}
             onCompareToggle={() => setIsCompareEnabled(prev => !prev)}
-            onCompareFromMonthChange={setCompareFromMonth}
-            onCompareToMonthChange={setCompareToMonth}
+            onCompareFromDateChange={setCompareFromDate}
+            onCompareToDateChange={setCompareToDate}
             onApplyFlexibleRange={applyFlexibleReportRange}
             onCreateNewPeriod={handleCreateNewPeriod}
             onPrint={handlePrint}
