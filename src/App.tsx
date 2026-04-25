@@ -74,6 +74,11 @@ interface Entry {
   debitNote: number; // مذكرة خطأ مدين
   invoices: number; // فواتير
   creditNote: number; // مذكرة خطأ دائن
+  documentNumber?: string;
+  solar?: number;
+  fuel80?: number;
+  fuel92?: number;
+  fuel95?: number;
 }
 
 interface BalanceEntry extends Entry {
@@ -782,6 +787,9 @@ export default function App() {
         rows.push({
           id: `virtual-${index}-${date}`,
           date,
+          solar: 0,
+          fuel80: 0,
+          fuel95: 0,
           revenue: 0,
           coupons: 0,
           debitNote: 0,
@@ -845,6 +853,21 @@ export default function App() {
       finalBalance
     };
   }, [currentViewEntries, openingBalance, viewingArchive]);
+
+  const quantityTotals = useMemo(() => {
+    const sumSolar = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.solar) || 0), 0);
+    const sum80 = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.fuel80) || 0), 0);
+    const sum92 = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.fuel92) || 0), 0);
+    const sum95 = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.fuel95) || 0), 0);
+
+    return {
+      sumSolar,
+      sum80,
+      sum92,
+      sum95,
+      sumTotal: sumSolar + sum80 + sum92 + sum95,
+    };
+  }, [currentViewEntries]);
 
   const updateRowDate = (id: string, newDate: string) => {
     if (!newDate) return;
@@ -927,6 +950,11 @@ export default function App() {
       const newEntry: Entry = {
         id: Math.random().toString(36).substr(2, 9),
         date: field === 'date' ? (value as string) : originalDate,
+        documentNumber: '',
+        solar: 0,
+        fuel80: 0,
+        fuel92: 0,
+        fuel95: 0,
         revenue: 0,
         coupons: 0,
         debitNote: 0,
@@ -1613,10 +1641,10 @@ export default function App() {
           {/* Main Ledger Table */}
           <div id="ledger-table" className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden mb-8 print:shadow-none print:border-slate-300">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] border-collapse text-right">
+              <table className="w-full min-w-[1220px] border-collapse text-right">
                 <thead>
                   <tr className="bg-slate-100 border-b border-slate-300">
-                    <th className="p-3 text-slate-800 font-black border-l border-slate-300 bg-slate-200 text-center text-lg w-[26%]">
+                    <th className="p-3 text-slate-800 font-black border-l border-slate-300 bg-slate-200 text-center text-lg w-[26%] min-w-[260px]">
                       تاريخ
                     </th>
                     <th colSpan={3} className="p-3 text-emerald-800 font-black border-l border-slate-300 bg-emerald-50 text-center text-lg">
@@ -1628,15 +1656,27 @@ export default function App() {
                     <th className="p-3 text-slate-800 font-black bg-slate-200 text-center text-lg">
                       رصيد
                     </th>
+                    <th className="p-3 text-slate-800 font-black border-r border-slate-300 bg-slate-200 text-center text-lg min-w-[110px]">
+                      رقم مستند
+                    </th>
+                    <th colSpan={5} className="p-3 text-sky-800 font-black border-r border-slate-300 bg-sky-50 text-center text-lg">
+                      الكميات الواردة
+                    </th>
                   </tr>
                   <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold">
-                    <th className="p-2 text-slate-600 border-l border-slate-200 text-center w-[26%]"></th>
-                    <th className="p-2 text-emerald-600 border-l border-slate-200 text-center w-[12%]">إيداع</th>
-                    <th className="p-2 text-emerald-600 border-l border-slate-200 text-center w-[12%]">بونات</th>
-                    <th className="p-2 text-emerald-600 border-l border-slate-200 text-center w-[12%]">مذكرة خطأ</th>
-                    <th className="p-2 text-rose-600 border-l border-slate-200 text-center w-[12%]">فواتير</th>
-                    <th className="p-2 text-rose-600 border-l border-slate-200 text-center w-[12%]">مذكرة خطأ</th>
-                    <th className="p-2 text-slate-600 text-center w-[15%]"></th>
+                    <th className="p-2 text-slate-600 border-l border-slate-200 text-center w-[26%] min-w-[260px]"></th>
+                    <th className="p-2 text-emerald-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">إيداع</th>
+                    <th className="p-2 text-emerald-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">بونات</th>
+                    <th className="p-2 text-emerald-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">مذكرة خطأ</th>
+                    <th className="p-2 text-rose-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">فواتير</th>
+                    <th className="p-2 text-rose-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">مذكرة خطأ</th>
+                    <th className="p-2 text-slate-600 border-r border-slate-200 text-center w-[15%]"></th>
+                    <th className="p-2 text-slate-600 border-r border-slate-200 text-center min-w-[110px]"></th>
+                    <th className="p-2 text-sky-600 border-r border-slate-200 text-center min-w-[96px]">سولار</th>
+                    <th className="p-2 text-sky-600 border-r border-slate-200 text-center min-w-[84px]">80</th>
+                    <th className="p-2 text-sky-600 border-r border-slate-200 text-center min-w-[84px]">92</th>
+                    <th className="p-2 text-sky-600 border-r-2 border-slate-300 text-center min-w-[84px]">95</th>
+                    <th className="p-2 text-sky-700 text-center min-w-[102px]">مجموع</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1651,7 +1691,7 @@ export default function App() {
                         className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors group"
                       >
                         {/* Date Column */}
-                        <td className="p-4 border-l border-slate-200 group-hover:bg-slate-50 transition-colors align-middle">
+                        <td className="p-4 border-l border-slate-200 group-hover:bg-slate-50 transition-colors align-middle min-w-[260px]">
                           <div className="relative flex items-center justify-center group/date gap-3">
                             {!viewingArchive && (
                               <button 
@@ -1662,8 +1702,8 @@ export default function App() {
                                 <Trash2 size={16} />
                               </button>
                             )}
-                            <div className="relative flex-1 max-w-[280px] whitespace-nowrap">
-                              <div className="flex items-center justify-center gap-2">
+                            <div className="relative flex-1 max-w-none whitespace-nowrap">
+                              <div className="relative flex items-center justify-center">
                                 <CustomDateInput 
                                   value={entry.date}
                                   onChange={(newVal) => updateRowDate(entry.id, newVal)}
@@ -1673,7 +1713,7 @@ export default function App() {
                                 {duplicateMetaByRow[index]?.total > 1 && duplicateMetaByRow[index]?.order > 1 && (
                                   <span
                                     dir="ltr"
-                                    className="shrink-0 text-[10px] leading-none px-1.5 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-700 font-bold"
+                                    className="pointer-events-none absolute -top-2 -start-1 text-[10px] leading-none px-1.5 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-700 font-bold shadow-sm"
                                     title="ترتيب السجل داخل نفس اليوم"
                                   >
                                     #{duplicateMetaByRow[index].order}
@@ -1685,7 +1725,7 @@ export default function App() {
                         </td>
 
                         {/* Debit Section */}
-                        <td className="p-2 border-l border-slate-200 bg-emerald-50/10">
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-emerald-50/10">
                           <input 
                             type="number" 
                             value={entry.revenue || ''}
@@ -1695,7 +1735,7 @@ export default function App() {
                             className={`w-full text-center bg-transparent border-none focus:ring-0 text-emerald-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
                           />
                         </td>
-                        <td className="p-2 border-l border-slate-200 bg-emerald-50/10">
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-emerald-50/10">
                           <input 
                             type="number" 
                             value={entry.coupons || ''}
@@ -1705,7 +1745,7 @@ export default function App() {
                             className={`w-full text-center bg-transparent border-none focus:ring-0 text-emerald-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
                           />
                         </td>
-                        <td className="p-2 border-l border-slate-200 bg-emerald-50/5">
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-emerald-50/5">
                           <input 
                             type="number" 
                             value={entry.debitNote || ''}
@@ -1717,7 +1757,7 @@ export default function App() {
                         </td>
 
                         {/* Credit Section */}
-                        <td className="p-2 border-l border-slate-200 bg-rose-50/10">
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-rose-50/10">
                           <input 
                             type="number" 
                             value={entry.invoices || ''}
@@ -1727,7 +1767,7 @@ export default function App() {
                             className={`w-full text-center bg-transparent border-none focus:ring-0 text-rose-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
                           />
                         </td>
-                        <td className="p-2 border-l border-slate-200 bg-rose-50/5">
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-rose-50/5">
                           <input 
                             type="number" 
                             value={entry.creditNote || ''}
@@ -1747,6 +1787,63 @@ export default function App() {
                             (Number(entry.creditNote) || 0) !== 0)
                             ? (Number(entry.rowBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })
                             : ""}
+                        </td>
+
+                        <td className="p-2 border-r border-slate-200 bg-slate-50/10">
+                          <input
+                            type="text"
+                            value={entry.documentNumber || ''}
+                            placeholder="-"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'documentNumber', e.target.value)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-slate-700 font-bold ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+
+                        <td className="p-2 border-r border-slate-200 bg-sky-50/15">
+                          <input
+                            type="number"
+                            value={entry.solar || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'solar', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-sky-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 border-r border-slate-200 bg-sky-50/15">
+                          <input
+                            type="number"
+                            value={entry.fuel80 || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'fuel80', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-sky-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 border-r border-slate-200 bg-sky-50/15">
+                          <input
+                            type="number"
+                            value={entry.fuel92 || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'fuel92', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-sky-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 border-r border-slate-200 bg-sky-50/15">
+                          <input
+                            type="number"
+                            value={entry.fuel95 || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'fuel95', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-sky-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 text-center font-mono font-black text-sky-800 bg-sky-50/30">
+                          {((Number(entry.solar) || 0) + (Number(entry.fuel80) || 0) + (Number(entry.fuel92) || 0) + (Number(entry.fuel95) || 0))
+                            ? ((Number(entry.solar) || 0) + (Number(entry.fuel80) || 0) + (Number(entry.fuel92) || 0) + (Number(entry.fuel95) || 0)).toLocaleString()
+                            : ''}
                         </td>
                       </motion.tr>
                     ))}
@@ -1770,9 +1867,15 @@ export default function App() {
                     <td className="p-3 border-l border-slate-700 text-center font-mono text-rose-300 text-sm">
                       {totals.sumCreditNote.toLocaleString()}
                     </td>
-                    <td className="p-3 text-center font-mono text-lg bg-slate-800">
+                    <td className="p-3 border-r border-slate-700 text-center font-mono text-lg bg-slate-800">
                       {totals.finalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </td>
+                    <td className="p-3 border-r border-slate-700 text-center text-xs opacity-60">-</td>
+                    <td className="p-3 border-r border-slate-700 text-center font-mono text-sky-300">{quantityTotals.sumSolar.toLocaleString()}</td>
+                    <td className="p-3 border-r border-slate-700 text-center font-mono text-sky-300">{quantityTotals.sum80.toLocaleString()}</td>
+                    <td className="p-3 border-r border-slate-700 text-center font-mono text-sky-300">{quantityTotals.sum92.toLocaleString()}</td>
+                    <td className="p-3 border-r-2 border-slate-500 text-center font-mono text-sky-300">{quantityTotals.sum95.toLocaleString()}</td>
+                    <td className="p-3 text-center font-mono text-sky-200">{quantityTotals.sumTotal.toLocaleString()}</td>
                   </tr>
                 </tfoot>
               </table>
