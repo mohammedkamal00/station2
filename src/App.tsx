@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { HashRouter, Route, Routes } from 'react-router-dom';
 import HealthPage from './HealthPage';
 
 function Home() {
@@ -11,11 +11,11 @@ function Home() {
 
 export default function App() {
   return (
-    <BrowserRouter basename="/station2">
+    <HashRouter>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/health" element={<HealthPage />} />
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 }
