@@ -1,0 +1,2111 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  Plus, 
+  Trash2, 
+  Printer, 
+  Save, 
+  Calculator, 
+  Calendar as CalendarIcon,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  FileText,
+  Info,
+  History,
+  Archive,
+  RotateCcw,
+  X,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown,
+  Search,
+  Filter,
+  ArrowUpDown,
+  ChevronFirst,
+  ChevronLast,
+  LayoutDashboard,
+  Clock,
+  CalendarDays,
+  LogOut,
+  Menu,
+  BarChart3
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  createArchive,
+  deleteAllEntries,
+  deleteEntryById,
+  listArchives,
+  listEntries,
+  listSettings,
+  setSetting,
+  upsertEntries,
+} from './lib/storage';
+import { useAuth } from './auth/AuthContext';
+import LoginPage from './components/LoginPage';
+import { CustomDateInput } from './components/CustomDateInput';
+import ReportsPage from './pages/ReportsPage';
+import ArchiveListPage from './pages/ArchiveListPage';
+import {
+  getNextPeriod,
+  getFirstPeriod,
+  getPeriodInfo,
+  formatDateToISO,
+  generateDatesForPeriod,
+  createEmptyEntry,
+  type PeriodInfo,
+} from './lib/periodHelper';
+
+interface Entry {
+  id: string;
+  date: string;
+  revenue: number; // إيداع
+  coupons: number; // بونات
+  debitNote: number; // مذكرة خطأ مدين
+  invoices: number; // فواتير
+  creditNote: number; // مذكرة خطأ دائن
+  documentNumber?: string;
+  solar?: number;
+  fuel80?: number;
+  fuel92?: number;
+  fuel95?: number;
+}
+
+interface BalanceEntry extends Entry {
+  rowBalance: number;
+  balance: number;
+}
+
+interface Period {
+  key: string;
+  startDate: string;
+  endDate: string;
+  month: number;
+  year: number;
+  startDay?: number;
+  endDay?: number;
+  displayLabel: string;
+  entries: BalanceEntry[];
+  count: number;
+  closingBalance: number;
+}
+
+interface CurrentPeriodMeta {
+  startDate: string;
+  endDate: string;
+  month: number;
+  year: number;
+  startDay: number;
+  endDay: number;
+}
+
+type View = 'ledger' | 'archive-list' | 'reports';
+
+export default function MainPage() {
+  const { user, loading: authLoading, signOut } = useAuth();
+  const [allEntries, setAllEntries] = useState<Entry[]>([]);
+  const [openingBalance, setOpeningBalance] = useState<number>(0);
+  const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null); // null means current
+  const [view, setView] = useState<View>('ledger');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [archiveSortOrder, setArchiveSortOrder] = useState<'newest' | 'oldest'>('newest');
+  const [archiveSearch, setArchiveSearch] = useState('');
+  const [archiveFromDate, setArchiveFromDate] = useState('');
+  const [archiveToDate, setArchiveToDate] = useState('');
+  const [archiveMinTransactions, setArchiveMinTransactions] = useState<number | ''>('');
+  const [archivePage, setArchivePage] = useState(1);
+  const [archiveRowsPerPage, setArchiveRowsPerPage] = useState(10);
+  const [archiveSortField, setArchiveSortField] = useState<'date' | 'count' | 'balance'>('date');
+  const [archiveSortDirection, setArchiveSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [reportFromDate, setReportFromDate] = useState('');
+  const [reportToDate, setReportToDate] = useState('');
+  const [isCompareEnabled, setIsCompareEnabled] = useState(false);
+  const [compareFromDate, setCompareFromDate] = useState('');
+  const [compareToDate, setCompareToDate] = useState('');
+  const [lastAddedId, setLastAddedId] = useState<string | null>(null);
+  const [currentPeriodDates, setCurrentPeriodDates] = useState<string[]>([]);
+  const [currentPeriodMeta, setCurrentPeriodMeta] = useState<CurrentPeriodMeta | null>(null);
+  const [hasInitializedPeriod, setHasInitializedPeriod] = useState(false);
+  const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [archives, setArchives] = useState<any[]>([]);
+  const [viewingArchive, setViewingArchive] = useState<any | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showNewPeriodModal, setShowNewPeriodModal] = useState(false);
+  const [newPeriodStartDate, setNewPeriodStartDate] = useState('');
+  const [newPeriodEndDate, setNewPeriodEndDate] = useState('');
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const fetchEntries = async () => {
+    try {
+      const data = await listEntries();
+      setAllEntries(data);
+    } catch (err) {
+      console.error("Failed to fetch entries", err);
+    }
+  };
+
+  const scrollToSummary = () => {
+    const element = document.getElementById('summary-section');
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const scrollToLedger = () => {
+    const element = document.getElementById('ledger-table');
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const data = await listSettings();
+      if (data.openingBalance !== undefined) {
+        setOpeningBalance(parseFloat(data.openingBalance) || 0);
+      }
+
+      if (data.currentPeriodMeta) {
+        try {
+          const parsed = JSON.parse(data.currentPeriodMeta) as CurrentPeriodMeta;
+          if (parsed?.startDate && parsed?.endDate && parsed?.month && parsed?.year) {
+            setCurrentPeriodMeta(parsed);
+          }
+        } catch (parseError) {
+          console.warn('Invalid currentPeriodMeta setting, ignoring', parseError);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch settings", err);
+    }
+  };
+
+  const fetchArchives = async () => {
+    try {
+      const data = await listArchives();
+      setArchives(data);
+    } catch (err) {
+      console.error("Failed to fetch archives", err);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    fetchEntries();
+    fetchSettings();
+    fetchArchives();
+  }, [user]);
+
+  // Refresh data when navigating between views to ensure latest state
+  useEffect(() => {
+    if (view === 'ledger') {
+      fetchEntries();
+      fetchSettings();
+    } else if (view === 'archive-list') {
+      fetchArchives();
+    }
+  }, [view, user]);
+
+  useEffect(() => {
+    let startDate: string;
+    let endDate: string;
+
+    if (!selectedPeriod) {
+      if (currentPeriodMeta) {
+        startDate = currentPeriodMeta.startDate;
+        endDate = currentPeriodMeta.endDate;
+      } else if (allEntries.length > 0) {
+        const latestDate = [...allEntries]
+          .sort((a, b) => b.date.localeCompare(a.date))[0]
+          ?.date;
+
+        if (latestDate) {
+          const inferred = getPeriodInfo(latestDate);
+          startDate = inferred.startDateStr;
+          endDate = inferred.endDateStr;
+        } else {
+          const firstPeriod = getFirstPeriod();
+          startDate = firstPeriod.startDateStr;
+          endDate = firstPeriod.endDateStr;
+        }
+      } else {
+        const firstPeriod = getFirstPeriod();
+        startDate = firstPeriod.startDateStr;
+        endDate = firstPeriod.endDateStr;
+      }
+    } else {
+      [startDate, endDate] = selectedPeriod.split(' → ');
+    }
+
+    const dates = generateDatesForPeriod(startDate, endDate);
+    setCurrentPeriodDates(dates);
+    setHasInitializedPeriod(true);
+  }, [selectedPeriod, allEntries, currentPeriodMeta]);
+
+  const saveEntries = async (entriesToSave: Entry[]) => {
+    try {
+      await upsertEntries(entriesToSave);
+    } catch (err) {
+      console.error("Failed to save entries", err);
+    }
+  };
+
+  const saveOpeningBalance = async (val: number) => {
+    try {
+      await setSetting('openingBalance', val.toString());
+    } catch (err) {
+      console.error("Failed to save opening balance", err);
+    }
+  };
+
+  const handleSaveAndArchive = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      // 1. Save all entries to ensure everything is up to date
+      await upsertEntries(allEntries);
+
+      // 2. Create a snapshot for the archive
+      let currentPeriod;
+      if (selectedPeriod) {
+        currentPeriod = periods.find(p => p.key === selectedPeriod);
+      } else {
+        // For the current period, we can derive the label from the current view dates
+        const start = currentPeriodDates[0];
+        const end = currentPeriodDates[currentPeriodDates.length - 1];
+        const currentInfo = start ? getPeriodInfo(start) : getFirstPeriod();
+        currentPeriod = {
+          key: `${start} → ${end}`,
+          month: currentInfo.month,
+          year: currentInfo.year,
+          startDay: currentInfo.startDay,
+          endDay: currentInfo.endDay,
+          displayLabel: `${formatDateArabic(start)} ← ${formatDateArabic(end)}`
+        };
+      }
+      
+      if (currentPeriod) {
+        const archiveData = {
+          entries: currentViewEntries,
+          totals: totals,
+          openingBalance: openingBalance,
+          periodKey: currentPeriod.key,
+          displayLabel: currentPeriod.displayLabel,
+          periodMonth: currentPeriod.month,
+          periodYear: currentPeriod.year,
+          periodStartDay: currentPeriod.startDay,
+          periodEndDay: currentPeriod.endDay,
+        };
+
+        await createArchive({
+          id: Math.random().toString(36).substr(2, 9),
+          name: currentPeriod.displayLabel,
+          data: archiveData,
+        });
+      }
+      
+      // 3. Refresh archives
+      await fetchArchives();
+
+      // 4. Show success message
+      setNotification({ message: 'تم حفظ وأرشفة الفترة بنجاح', type: 'success' });
+      
+      // 5. Wait a bit then navigate to archive
+      setTimeout(() => {
+        setView('archive-list');
+        setNotification(null);
+      }, 1500);
+    } catch (err) {
+      console.error("Failed to save and archive", err);
+      setNotification({ message: 'فشل حفظ الفترة، يرجى المحاولة مرة أخرى', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCreateNewPeriod = async () => {
+    console.log("handleCreateNewPeriod clicked");
+
+    let suggestedPeriod: PeriodInfo;
+
+    if (currentPeriodMeta) {
+      suggestedPeriod = getNextPeriod(currentPeriodMeta.endDate);
+    } else if (allEntries.length === 0) {
+      suggestedPeriod = getFirstPeriod();
+    } else {
+      const sortedEntries = [...allEntries].sort((a, b) => b.date.localeCompare(a.date));
+      const latestDate = sortedEntries[0].date;
+      const inferredPeriod = getPeriodInfo(latestDate);
+      suggestedPeriod = getNextPeriod(inferredPeriod.endDateStr);
+    }
+
+    // Prefill only (editable by user)
+    setNewPeriodStartDate(suggestedPeriod.startDateStr);
+    setNewPeriodEndDate(suggestedPeriod.endDateStr);
+    setShowNewPeriodModal(true);
+  };
+
+  const handleConfirmCreateNewPeriod = async () => {
+    if (isCreatingNew) return;
+
+    if (!newPeriodStartDate || !newPeriodEndDate) {
+      setNotification({ message: 'يرجى إدخال تاريخ البداية وتاريخ النهاية', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
+
+    const start = new Date(newPeriodStartDate);
+    const end = new Date(newPeriodEndDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      setNotification({ message: 'صيغة التاريخ غير صحيحة', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
+
+    if (start > end) {
+      setNotification({ message: 'تاريخ البداية يجب أن يكون قبل أو يساوي تاريخ النهاية', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
+
+    setIsCreatingNew(true);
+
+    try {
+      await deleteAllEntries();
+
+      const dates = generateDatesForPeriod(newPeriodStartDate, newPeriodEndDate);
+      const newEntries = dates.map(dateStr => createEmptyEntry(dateStr));
+      await upsertEntries(newEntries);
+
+      const infoFromStart = getPeriodInfo(newPeriodStartDate);
+      const nextPeriodMeta: CurrentPeriodMeta = {
+        startDate: newPeriodStartDate,
+        endDate: newPeriodEndDate,
+        month: infoFromStart.month,
+        year: infoFromStart.year,
+        startDay: infoFromStart.startDay,
+        endDay: infoFromStart.endDay,
+      };
+
+      await setSetting('currentPeriodMeta', JSON.stringify(nextPeriodMeta));
+      await saveOpeningBalance(0);
+
+      setAllEntries(newEntries);
+      setCurrentPeriodMeta(nextPeriodMeta);
+      setCurrentPeriodDates(dates);
+      setOpeningBalance(0);
+      setSelectedPeriod(null);
+      setViewingArchive(null);
+      setView('ledger');
+      setShowNewPeriodModal(false);
+      window.scrollTo(0, 0);
+
+      setNotification({ message: 'تم إنشاء الفترة بنجاح بالقيم التي أدخلتها', type: 'success' });
+      setTimeout(() => setNotification(null), 3000);
+    } catch (err) {
+      console.error("Failed to create new period:", err);
+      setNotification({ message: 'فشل إنشاء فترة جديدة، يرجى المحاولة مرة أخرى', type: 'error' });
+      setTimeout(() => setNotification(null), 3000);
+    } finally {
+      setIsCreatingNew(false);
+    }
+  };
+
+  // Calculate cumulative balances for all entries
+  const entriesWithBalance = useMemo(() => {
+    const sorted = [...allEntries].sort((a, b) => a.date.localeCompare(b.date));
+    let currentBalance = openingBalance;
+    
+    return sorted.map(entry => {
+      const rowDebit = (Number(entry.revenue) || 0) + (Number(entry.coupons) || 0) + (Number(entry.debitNote) || 0);
+      const rowCredit = (Number(entry.invoices) || 0) + (Number(entry.creditNote) || 0);
+      const rowBalance = rowDebit - rowCredit;
+      currentBalance = currentBalance + rowBalance;
+      return { ...entry, rowBalance, balance: currentBalance } as BalanceEntry;
+    });
+  }, [allEntries, openingBalance]);
+
+  const formatDateArabic = (dateStr: string) => {
+    if (!dateStr) return '';
+    const [year, month, day] = dateStr.split('-');
+    const fullYear = year.length === 2 ? `20${year}` : year;
+    return `${day} / ${month} / ${fullYear}`;
+  };
+
+  // Period calculation logic
+  const periods = useMemo(() => {
+    if (entriesWithBalance.length === 0) return [];
+
+    const grouped: Record<string, BalanceEntry[]> = {};
+    
+    entriesWithBalance.forEach(entry => {
+      const periodInfo = getPeriodInfo(entry.date);
+      const key = `${periodInfo.startDateStr} → ${periodInfo.endDateStr}`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(entry);
+    });
+
+    const periodList = Object.entries(grouped).map(([key, entries]) => {
+      const [start, end] = key.split(' → ');
+      
+      // Ensure dates are ordered correctly (oldest to newest)
+      const d1 = new Date(start);
+      const d2 = new Date(end);
+      const actualStart = d1 < d2 ? start : end;
+      const actualEnd = d1 < d2 ? end : start;
+      const sortedEntries = entries.sort((a, b) => a.date.localeCompare(b.date));
+      const closingBalance = sortedEntries[sortedEntries.length - 1]?.balance ?? 0;
+      const periodInfo = getPeriodInfo(actualStart);
+
+      return {
+        key,
+        startDate: actualStart,
+        endDate: actualEnd,
+        month: periodInfo.month,
+        year: periodInfo.year,
+        startDay: periodInfo.startDay,
+        endDay: periodInfo.endDay,
+        displayLabel: `${formatDateArabic(actualStart)} ← ${formatDateArabic(actualEnd)}`,
+        entries: sortedEntries,
+        count: entries.length,
+        closingBalance
+      };
+    });
+
+    return periodList.sort((a, b) => a.startDate.localeCompare(b.startDate));
+  }, [entriesWithBalance]);
+
+  const archiveList = useMemo(() => {
+    return archives.map(arc => {
+      const entries = arc.data.entries || [];
+      const totals = arc.data.totals || { finalBalance: 0 };
+      const startDate = entries[0]?.date || '';
+      const inferred = startDate ? getPeriodInfo(startDate) : getFirstPeriod();
+      const periodMonth = arc.data.periodMonth ?? inferred.month;
+      const periodYear = arc.data.periodYear ?? inferred.year;
+      const monthKey = `${periodYear}-${String(periodMonth).padStart(2, '0')}`;
+
+      const totalDebit = Number((totals as any).totalDebit ?? 0) || 0;
+      const totalCredit = Number((totals as any).totalCredit ?? 0) || 0;
+      const net = totalDebit - totalCredit;
+
+      return {
+        id: arc.id,
+        key: arc.data.periodKey,
+        startDate,
+        endDate: entries[entries.length - 1]?.date || '',
+        month: periodMonth,
+        year: periodYear,
+        monthKey,
+        displayLabel: arc.name,
+        entries: entries,
+        count: entries.filter((e: any) => e.revenue || e.coupons || e.invoices).length,
+        totalDebit,
+        totalCredit,
+        net,
+        closingBalance: totals.finalBalance,
+        fullData: arc.data
+      };
+    });
+  }, [archives]);
+
+  const archiveStats = useMemo(() => {
+    const totalPeriods = archiveList.length;
+    const totalTransactions = archiveList.reduce((acc, p) => acc + p.count, 0);
+    const lastClosingBalance = archiveList.length > 0 ? archiveList[archiveList.length - 1].closingBalance : 0;
+    return { totalPeriods, totalTransactions, lastClosingBalance };
+  }, [archiveList]);
+
+  const monthLabel = (monthKey: string) => {
+    if (!monthKey) return '-';
+    const [year, month] = monthKey.split('-').map(Number);
+    const date = new Date(year, (month || 1) - 1, 1);
+    return date.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' });
+  };
+
+  const monthNumber = (monthKey: string) => {
+    if (!monthKey || !monthKey.includes('-')) return 0;
+    const [year, month] = monthKey.split('-').map(Number);
+    return (year * 100) + month;
+  };
+
+  const shiftToMonthStart = (dateStr: string, monthsBack: number) => {
+    const [year, month] = dateStr.split('-').map(Number);
+    return formatDateToISO(new Date(year, month - 1 - monthsBack, 1));
+  };
+
+  const shiftYear = (dateStr: string, yearsBack: number) => {
+    const [year, month, day] = dateStr.split('-').map(Number);
+    return formatDateToISO(new Date(year - yearsBack, month - 1, day));
+  };
+
+  const startOfYear = (dateStr: string) => {
+    const [year] = dateStr.split('-');
+    return `${year}-01-01`;
+  };
+
+  const archiveDateBounds = useMemo(() => {
+    if (archiveList.length === 0) {
+      return { earliest: '', latest: '' };
+    }
+
+    const earliest = archiveList.reduce((min, period) => {
+      if (!min) return period.startDate;
+      return period.startDate < min ? period.startDate : min;
+    }, '');
+
+    const latest = archiveList.reduce((max, period) => {
+      if (!max) return period.endDate;
+      return period.endDate > max ? period.endDate : max;
+    }, '');
+
+    return { earliest, latest };
+  }, [archiveList]);
+
+  useEffect(() => {
+    if (!archiveDateBounds.latest) return;
+
+    const defaultTo = archiveDateBounds.latest;
+    const defaultFrom = shiftToMonthStart(defaultTo, 5);
+
+    if (!reportFromDate) setReportFromDate(defaultFrom);
+    if (!reportToDate) setReportToDate(defaultTo);
+
+    if (!compareFromDate || !compareToDate) {
+      setCompareFromDate(shiftYear(reportFromDate || defaultFrom, 1));
+      setCompareToDate(shiftYear(reportToDate || defaultTo, 1));
+    }
+  }, [archiveDateBounds, reportFromDate, reportToDate, compareFromDate, compareToDate]);
+
+  const buildReportRows = (fromDate: string, toDate: string) => {
+    if (!fromDate || !toDate || toDate < fromDate) {
+      return [] as Array<{ monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>;
+    }
+
+    const grouped = new Map<string, { monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>();
+
+    archiveList.forEach(period => {
+      if (period.endDate < fromDate || period.startDate > toDate) return;
+
+      period.entries.forEach(entry => {
+        if (!entry?.date || entry.date < fromDate || entry.date > toDate) return;
+
+        const monthKey = entry.date.slice(0, 7);
+        const existing = grouped.get(monthKey) || {
+          monthKey,
+          label: monthLabel(monthKey),
+          totalDebit: 0,
+          totalCredit: 0,
+          net: 0,
+        };
+
+        const rowDebit = (Number(entry.revenue) || 0) + (Number(entry.coupons) || 0) + (Number(entry.debitNote) || 0);
+        const rowCredit = (Number(entry.invoices) || 0) + (Number(entry.creditNote) || 0);
+
+        existing.totalDebit += rowDebit;
+        existing.totalCredit += rowCredit;
+        existing.net = existing.totalDebit - existing.totalCredit;
+        grouped.set(monthKey, existing);
+      });
+    });
+
+    return Array.from(grouped.values()).sort((a, b) => monthNumber(a.monthKey) - monthNumber(b.monthKey));
+  };
+
+  const reportRows = useMemo(() => buildReportRows(reportFromDate, reportToDate), [archiveList, reportFromDate, reportToDate]);
+
+  const reportSummary = useMemo(() => {
+    const totalDebit = reportRows.reduce((sum, row) => sum + row.totalDebit, 0);
+    const totalCredit = reportRows.reduce((sum, row) => sum + row.totalCredit, 0);
+    const netBalance = totalDebit - totalCredit;
+    return { totalDebit, totalCredit, netBalance };
+  }, [reportRows]);
+
+  const compareRows = useMemo(() => {
+    if (!isCompareEnabled) return [] as Array<{ monthKey: string; label: string; totalDebit: number; totalCredit: number; net: number }>;
+    return buildReportRows(compareFromDate, compareToDate);
+  }, [archiveList, isCompareEnabled, compareFromDate, compareToDate]);
+
+  const compareSummary = useMemo(() => {
+    const totalDebit = compareRows.reduce((sum, row) => sum + row.totalDebit, 0);
+    const totalCredit = compareRows.reduce((sum, row) => sum + row.totalCredit, 0);
+    const netBalance = totalDebit - totalCredit;
+    return { totalDebit, totalCredit, netBalance };
+  }, [compareRows]);
+
+  const comparisonDelta = useMemo(() => {
+    if (!isCompareEnabled) {
+      return {
+        debitDiff: 0,
+        creditDiff: 0,
+        netDiff: 0,
+        debitPct: null as number | null,
+        creditPct: null as number | null,
+        netPct: null as number | null,
+      };
+    }
+
+    const debitDiff = reportSummary.totalDebit - compareSummary.totalDebit;
+    const creditDiff = reportSummary.totalCredit - compareSummary.totalCredit;
+    const netDiff = reportSummary.netBalance - compareSummary.netBalance;
+
+    const calcPct = (current: number, previous: number) => {
+      if (!previous) return null;
+      return ((current - previous) / Math.abs(previous)) * 100;
+    };
+
+    return {
+      debitDiff,
+      creditDiff,
+      netDiff,
+      debitPct: calcPct(reportSummary.totalDebit, compareSummary.totalDebit),
+      creditPct: calcPct(reportSummary.totalCredit, compareSummary.totalCredit),
+      netPct: calcPct(reportSummary.netBalance, compareSummary.netBalance),
+    };
+  }, [isCompareEnabled, reportSummary, compareSummary]);
+
+  const filteredPeriods = useMemo(() => {
+    let result = [...archiveList];
+
+    // Search
+    if (archiveSearch) {
+      const search = archiveSearch.toLowerCase();
+      result = result.filter(p => 
+        p.displayLabel.toLowerCase().includes(search) || 
+        formatDateArabic(p.startDate).includes(search) || 
+        formatDateArabic(p.endDate).includes(search)
+      );
+    }
+
+    // Date filters
+    if (archiveFromDate) {
+      result = result.filter(p => p.startDate >= archiveFromDate);
+    }
+    if (archiveToDate) {
+      result = result.filter(p => p.endDate <= archiveToDate);
+    }
+
+    // Min transactions
+    if (archiveMinTransactions !== '') {
+      result = result.filter(p => p.count >= archiveMinTransactions);
+    }
+
+    // Sorting
+    result.sort((a, b) => {
+      let comparison = 0;
+      if (archiveSortField === 'date') {
+        comparison = a.startDate.localeCompare(b.startDate);
+      } else if (archiveSortField === 'count') {
+        comparison = a.count - b.count;
+      } else if (archiveSortField === 'balance') {
+        comparison = a.closingBalance - b.closingBalance;
+      }
+
+      return archiveSortDirection === 'desc' ? -comparison : comparison;
+    });
+
+    return result;
+  }, [archiveList, archiveSearch, archiveFromDate, archiveToDate, archiveMinTransactions, archiveSortField, archiveSortDirection]);
+
+  const paginatedPeriods = useMemo(() => {
+    const startIndex = (archivePage - 1) * archiveRowsPerPage;
+    return filteredPeriods.slice(startIndex, startIndex + archiveRowsPerPage);
+  }, [filteredPeriods, archivePage, archiveRowsPerPage]);
+
+  const totalPages = Math.ceil(filteredPeriods.length / archiveRowsPerPage);
+
+  // Filter entries for the current view
+  const currentViewEntries = useMemo(() => {
+    if (viewingArchive) {
+      const entries = viewingArchive.entries || [];
+      return entries.map((entry: any) => {
+        const rowDebit = (Number(entry.revenue) || 0) + (Number(entry.coupons) || 0) + (Number(entry.debitNote) || 0);
+        const rowCredit = (Number(entry.invoices) || 0) + (Number(entry.creditNote) || 0);
+        const rowBalance = rowDebit - rowCredit;
+        return {
+          ...entry,
+          rowBalance,
+          balance: Number(entry.balance) || 0,
+        } as BalanceEntry;
+      });
+    }
+
+    // Keep base period days and actual entry dates in one timeline.
+    const periodDates = [...currentPeriodDates];
+    const dateSet = new Set<string>(periodDates);
+    entriesWithBalance.forEach(entry => dateSet.add(entry.date));
+    const effectiveDates = Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+
+    // Group same-date entries to support allowed duplicate dates.
+    const entriesByDate = new Map<string, BalanceEntry[]>();
+    entriesWithBalance.forEach(entry => {
+      const bucket = entriesByDate.get(entry.date);
+      if (bucket) {
+        bucket.push(entry);
+      } else {
+        entriesByDate.set(entry.date, [entry]);
+      }
+    });
+    
+    let lastBalance = openingBalance;
+    // Find the balance before the earliest date in our current view
+    const earliestDate = effectiveDates.length > 0 ? effectiveDates[0] : '';
+    
+    const beforeEntries = entriesWithBalance.filter(e => e.date < earliestDate);
+    if (beforeEntries.length > 0) {
+      lastBalance = beforeEntries[beforeEntries.length - 1].balance;
+    }
+
+    const rows: BalanceEntry[] = [];
+
+    effectiveDates.forEach((date, index) => {
+      const entriesForDate = entriesByDate.get(date) || [];
+
+      if (entriesForDate.length === 0) {
+        rows.push({
+          id: `virtual-${index}-${date}`,
+          date,
+          solar: 0,
+          fuel80: 0,
+          fuel95: 0,
+          revenue: 0,
+          coupons: 0,
+          debitNote: 0,
+          invoices: 0,
+          creditNote: 0,
+          rowBalance: 0,
+          balance: lastBalance
+        } as BalanceEntry);
+        return;
+      }
+
+      entriesForDate.forEach(existing => {
+        lastBalance = existing.balance;
+        rows.push({ ...existing, id: existing.id });
+      });
+    });
+
+    return rows;
+  }, [currentPeriodDates, entriesWithBalance, openingBalance]);
+
+  const duplicateMetaByRow = useMemo(() => {
+    const totalByDate = new Map<string, number>();
+    currentViewEntries.forEach(entry => {
+      totalByDate.set(entry.date, (totalByDate.get(entry.date) || 0) + 1);
+    });
+
+    const seenByDate = new Map<string, number>();
+    return currentViewEntries.map(entry => {
+      const order = (seenByDate.get(entry.date) || 0) + 1;
+      seenByDate.set(entry.date, order);
+      return {
+        order,
+        total: totalByDate.get(entry.date) || 1,
+      };
+    });
+  }, [currentViewEntries]);
+
+  const totals = useMemo(() => {
+    if (viewingArchive) {
+      return viewingArchive.totals;
+    }
+
+    const sumRevenue = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.revenue) || 0), 0);
+    const sumCoupons = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.coupons) || 0), 0);
+    const sumDebitNote = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.debitNote) || 0), 0);
+    const sumInvoices = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.invoices) || 0), 0);
+    const sumCreditNote = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.creditNote) || 0), 0);
+    
+    const totalDebit = sumRevenue + sumCoupons + sumDebitNote;
+    const totalCredit = sumInvoices + sumCreditNote;
+    const finalBalance = currentViewEntries.length > 0 ? currentViewEntries[currentViewEntries.length - 1].balance : openingBalance;
+
+    return {
+      sumRevenue,
+      sumCoupons,
+      sumDebitNote,
+      totalDebit,
+      sumInvoices,
+      sumCreditNote,
+      totalCredit,
+      finalBalance
+    };
+  }, [currentViewEntries, openingBalance, viewingArchive]);
+
+  const quantityTotals = useMemo(() => {
+    const sumSolar = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.solar) || 0), 0);
+    const sum80 = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.fuel80) || 0), 0);
+    const sum92 = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.fuel92) || 0), 0);
+    const sum95 = currentViewEntries.reduce((acc, curr) => acc + (Number(curr.fuel95) || 0), 0);
+
+    return {
+      sumSolar,
+      sum80,
+      sum92,
+      sum95,
+      sumTotal: sumSolar + sum80 + sum92 + sum95,
+    };
+  }, [currentViewEntries]);
+
+  const updateRowDate = (id: string, newDate: string) => {
+    if (!newDate) return;
+    
+    // Ensure it's a valid date string
+    const dateObj = new Date(newDate);
+    if (isNaN(dateObj.getTime())) return;
+
+    // Find the old date to replace it in the current view list
+    let oldDate: string | undefined;
+    if (id.startsWith('virtual-')) {
+      oldDate = id.split('-').slice(2).join('-');
+    } else {
+      const entry = allEntries.find(e => e.id === id);
+      oldDate = entry?.date;
+    }
+
+    if (oldDate === newDate) return;
+
+    if (oldDate) {
+      setCurrentPeriodDates(prev => {
+        const moved = prev.map(d => d === oldDate ? newDate : d);
+        return Array.from(new Set(moved)).sort((a, b) => a.localeCompare(b));
+      });
+    }
+    
+    updateEntry(id, 'date', newDate);
+  };
+
+  const deleteEntry = async (id: string) => {
+    if (!confirm('هل أنت متأكد من حذف هذا اليوم؟')) return;
+
+    if (id.startsWith('virtual-')) {
+      const dateToDelete = id.split('-').slice(2).join('-'); // Extract date from virtual entry ID
+      setCurrentPeriodDates(prev => prev.filter(d => d !== dateToDelete));
+    } else {
+      const entryToDelete = allEntries.find(e => e.id === id);
+      if (entryToDelete) {
+        const updated = allEntries.filter(e => e.id !== id);
+        setAllEntries(updated);
+        setCurrentPeriodDates(prev => prev.filter(d => d !== entryToDelete.date));
+        
+        try {
+          await deleteEntryById(id);
+        } catch (err) {
+          console.error("Failed to delete entry", err);
+        }
+      }
+    }
+  };
+
+  const addNewDay = () => {
+    const allVisibleDates = currentViewEntries.map(entry => entry.date);
+    const lastDateStr = allVisibleDates.length > 0
+      ? [...allVisibleDates].sort((a, b) => a.localeCompare(b))[allVisibleDates.length - 1]
+      : new Date().toISOString().split('T')[0];
+    
+    const lastDate = new Date(lastDateStr);
+    lastDate.setDate(lastDate.getDate() + 1);
+    const nextDate = lastDate.toISOString().split('T')[0];
+    
+    setCurrentPeriodDates(prev => {
+      if (prev.includes(nextDate)) return prev;
+      return [...prev, nextDate].sort((a, b) => a.localeCompare(b));
+    });
+    
+    // Scroll to bottom
+    setTimeout(() => {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    }, 100);
+  };
+
+  const updateEntry = (id: string, field: keyof Entry, value: string | number) => {
+    let updated: Entry[];
+    let entryToSave: Entry | undefined;
+
+    if (id.startsWith('virtual-')) {
+      const parts = id.split('-');
+      const originalDate = parts.slice(2).join('-');
+      const newEntry: Entry = {
+        id: Math.random().toString(36).substr(2, 9),
+        date: field === 'date' ? (value as string) : originalDate,
+        documentNumber: '',
+        solar: 0,
+        fuel80: 0,
+        fuel92: 0,
+        fuel95: 0,
+        revenue: 0,
+        coupons: 0,
+        debitNote: 0,
+        invoices: 0,
+        creditNote: 0,
+        [field]: value
+      };
+      updated = [...allEntries, newEntry];
+      entryToSave = newEntry;
+    } else {
+      updated = allEntries.map(entry => {
+        if (entry.id === id) {
+          const updatedEntry = { ...entry, [field]: value };
+          entryToSave = updatedEntry;
+          return updatedEntry;
+        }
+        return entry;
+      });
+    }
+
+    setAllEntries(updated);
+    
+    if (entryToSave) {
+      saveEntries([entryToSave]);
+    }
+  };
+
+  const CustomDateInput = ({ 
+    value, 
+    onChange, 
+    className = "",
+    placeholder = "DD / MM / YYYY",
+    disabled = false
+  }: { 
+    value: string; 
+    onChange: (val: string) => void;
+    className?: string;
+    placeholder?: string;
+    disabled?: boolean;
+  }) => {
+    const [textValue, setTextValue] = useState('');
+    const dateInputRef = React.useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+      if (value) {
+        const [y, m, d] = value.split('-');
+        const fullYear = y.length === 2 ? `20${y}` : y;
+        setTextValue(`${d} / ${m} / ${fullYear}`);
+      } else {
+        setTextValue('');
+      }
+    }, [value]);
+
+    const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const val = e.target.value;
+      setTextValue(val);
+      
+      const cleanVal = val.replace(/\s/g, '');
+      const match = cleanVal.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (match) {
+        const d = match[1].padStart(2, '0');
+        const m = match[2].padStart(2, '0');
+        const y = match[3];
+        const isoDate = `${y}-${m}-${d}`;
+        if (!isNaN(new Date(isoDate).getTime())) {
+          onChange(isoDate);
+        }
+      }
+    };
+
+    const handleBlur = () => {
+      if (value) {
+        const [y, m, d] = value.split('-');
+        const fullYear = y.length === 2 ? `20${y}` : y;
+        setTextValue(`${d} / ${m} / ${fullYear}`);
+      }
+    };
+
+    const openPicker = () => {
+      if (disabled) return;
+      if (dateInputRef.current) {
+        // Focus first, then try showPicker, then fallback to click
+        dateInputRef.current.focus();
+        try {
+          // @ts-ignore
+          if (typeof dateInputRef.current.showPicker === 'function') {
+            // @ts-ignore
+            dateInputRef.current.showPicker();
+          } else {
+            dateInputRef.current.click();
+          }
+        } catch (err) {
+          dateInputRef.current.click();
+        }
+      }
+    };
+
+    return (
+      <div 
+        className={`relative flex items-center bg-white border border-slate-200 rounded-xl px-3 gap-3 focus-within:ring-2 focus-within:ring-emerald-500 transition-all whitespace-nowrap cursor-pointer print:border-none print:bg-transparent print:px-0 print:gap-0 print:rounded-none print:focus-within:ring-0 ${className}`}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            openPicker();
+          }
+        }}
+      >
+        <input 
+          type="text"
+          value={textValue}
+          onChange={handleTextChange}
+          onBlur={handleBlur}
+          placeholder={placeholder}
+          dir="ltr"
+          className="w-full bg-transparent border-none focus:ring-0 text-slate-800 font-bold text-sm text-center py-2 outline-none whitespace-nowrap print:text-[11px] print:py-0"
+        />
+        <div className="relative flex-shrink-0 print:hidden">
+          <button 
+            type="button"
+            onClick={openPicker}
+            className="p-1 text-slate-400 hover:text-emerald-600 transition-colors"
+            title="فتح التقويم"
+          >
+            <CalendarDays size={16} />
+          </button>
+          <input 
+            ref={dateInputRef}
+            type="date"
+            value={value || ''}
+            disabled={disabled}
+            onChange={(e) => {
+              if (e.target.value) {
+                onChange(e.target.value);
+              }
+            }}
+            className={`absolute inset-0 opacity-0 w-full h-full ${disabled ? 'cursor-default' : 'cursor-pointer'}`}
+            style={{ zIndex: 10 }}
+          />
+        </div>
+      </div>
+    );
+  };
+
+  const handlePrint = () => {
+    const originalTitle = document.title;
+
+    const toSafeDate = (value: string) => {
+      if (!value) return '';
+      if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        const [year, month, day] = value.split('-');
+        return `${day}-${month}-${year}`;
+      }
+
+      const slashMatch = value.match(/^(\d{1,2})\s*[\/-]\s*(\d{1,2})\s*[\/-]\s*(\d{4})$/);
+      if (slashMatch) {
+        const dd = slashMatch[1].padStart(2, '0');
+        const mm = slashMatch[2].padStart(2, '0');
+        const yyyy = slashMatch[3];
+        return `${dd}-${mm}-${yyyy}`;
+      }
+
+      return value.replace(/\//g, '-').trim();
+    };
+
+    const sanitizeFileName = (value: string) =>
+      value
+        .replace(/[\\/:*?"<>|]/g, '-')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+
+    const getPeriodRange = () => {
+      // الحالة الأهم: فترة مفتوحة من الأرشيف
+      if (viewingArchive) {
+        const entries = Array.isArray(viewingArchive.entries) ? viewingArchive.entries : [];
+        const datedEntries = entries
+          .map((e: any) => e?.date)
+          .filter((d: any): d is string => typeof d === 'string' && !!d)
+          .sort((a: string, b: string) => a.localeCompare(b));
+
+        const start = viewingArchive.startDate || datedEntries[0] || '';
+        const end = viewingArchive.endDate || datedEntries[datedEntries.length - 1] || '';
+        return { start, end, source: 'viewingArchive' };
+      }
+
+      if (selectedPeriod) {
+        const selected = periods.find((p) => p.key === selectedPeriod);
+        return {
+          start: selected?.startDate || '',
+          end: selected?.endDate || '',
+          source: 'selectedPeriod',
+        };
+      }
+
+      return {
+        start: currentPeriodDates[0] || '',
+        end: currentPeriodDates[currentPeriodDates.length - 1] || '',
+        source: 'currentPeriodDates',
+      };
+    };
+
+    const range = getPeriodRange();
+    const from = toSafeDate(range.start);
+    const to = toSafeDate(range.end);
+
+    if (!from || !to) {
+      console.warn('Print filename: period dates are missing from the active data source.', range);
+      window.print();
+      return;
+    }
+
+    const fileName = sanitizeFileName(`كشف-الفترة-من-${from}-إلى-${to}.pdf`);
+
+    document.title = fileName;
+
+    const restoreTitle = () => {
+      document.title = originalTitle;
+      window.removeEventListener('afterprint', restoreTitle);
+    };
+
+    window.addEventListener('afterprint', restoreTitle);
+    window.print();
+
+    // Fallback for browsers that may skip afterprint
+    setTimeout(restoreTitle, 800);
+  };
+
+  const resetLedger = () => {
+    if (confirm('هل تريد تصفير الجدول لبدء فترة جديدة؟')) {
+      // Actually, we don't delete. We just add new entries for the next 14 days if they don't exist.
+      // But for "reset", maybe the user wants to clear the current view?
+      // The requirement says "never delete". So reset is probably not what they want.
+      // I'll just disable it or make it add new empty entries.
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      setSelectedPeriod(null);
+      setViewingArchive(null);
+      setView('ledger');
+      setNotification(null);
+    } catch (err) {
+      console.error('Failed to logout', err);
+    }
+  };
+
+  const applyFlexibleReportRange = (range: number | 'year' | 'last-statement') => {
+    if (!archiveDateBounds.latest) return;
+
+    if (range === 'last-statement') {
+      const latestPeriod = archiveList.reduce<{ startDate: string; endDate: string } | null>((latest, period) => {
+        if (!latest) {
+          return { startDate: period.startDate, endDate: period.endDate };
+        }
+        if (period.endDate > latest.endDate) {
+          return { startDate: period.startDate, endDate: period.endDate };
+        }
+        return latest;
+      }, null);
+
+      if (!latestPeriod) return;
+      setReportFromDate(latestPeriod.startDate);
+      setReportToDate(latestPeriod.endDate);
+      return;
+    }
+
+    const targetTo = archiveDateBounds.latest;
+    const nextFrom = range === 'year'
+      ? startOfYear(targetTo)
+      : shiftToMonthStart(targetTo, range - 1);
+
+    setReportFromDate(nextFrom);
+    setReportToDate(targetTo);
+  };
+
+  const handleShowReport = () => {
+    const el = document.getElementById('advanced-report-section');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center" dir="rtl">
+        <div className="bg-white rounded-2xl border border-slate-200 px-6 py-5 shadow-lg font-bold text-slate-700">
+          جاري التحقق من الجلسة...
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  return (
+    <div className="app-root min-h-screen bg-[#F8F9FA] text-slate-900 font-sans flex flex-col lg:flex-row" dir="rtl">
+      <button
+        onClick={() => setIsMobileMenuOpen((prev) => !prev)}
+        className="lg:hidden fixed top-3 right-3 z-[80] bg-white border border-slate-200 text-slate-700 p-2.5 rounded-xl shadow-md print:hidden"
+        aria-label="فتح القائمة"
+      >
+        {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+      </button>
+
+      {isMobileMenuOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-slate-900/40 z-40 print:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Notifications */}
+      <AnimatePresence>
+        {notification && (
+          <motion.div 
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 20 }}
+            exit={{ opacity: 0, y: -50 }}
+            className={`fixed top-0 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 font-black ${
+              notification.type === 'success' ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'
+            }`}
+          >
+            {notification.type === 'success' ? <CheckCircle2 size={20} /> : <Info size={20} />}
+            {notification.message}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showNewPeriodModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] bg-slate-900/50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 16, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 16, scale: 0.98 }}
+              className="w-full max-w-xl bg-white rounded-2xl border border-slate-200 shadow-2xl p-5 sm:p-6"
+            >
+              <h3 className="text-xl font-black text-slate-800 mb-2">إنشاء فترة جديدة</h3>
+              <p className="text-sm text-slate-500 font-bold mb-5">
+                تم اقتراح التواريخ تلقائيًا. يمكنك تعديلها بحرية قبل الحفظ.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-500 mb-2">تاريخ البداية</label>
+                  <CustomDateInput
+                    value={newPeriodStartDate}
+                    onChange={setNewPeriodStartDate}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 mb-2">تاريخ النهاية</label>
+                  <CustomDateInput
+                    value={newPeriodEndDate}
+                    onChange={setNewPeriodEndDate}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-6 flex flex-col sm:flex-row gap-3 justify-end">
+                <button
+                  onClick={() => setShowNewPeriodModal(false)}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold hover:bg-slate-50 transition-colors"
+                >
+                  إلغاء
+                </button>
+                <button
+                  onClick={handleConfirmCreateNewPeriod}
+                  disabled={isCreatingNew}
+                  className={`w-full sm:w-auto px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-black hover:bg-emerald-700 transition-colors ${isCreatingNew ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isCreatingNew ? 'جاري الإنشاء...' : 'حفظ وإنشاء الفترة'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Sidebar */}
+      <aside className={`fixed inset-y-0 right-0 z-50 w-[88vw] max-w-xs bg-white border-l border-slate-200 flex flex-col h-screen print:hidden shadow-lg transform transition-transform duration-300 lg:static lg:w-80 lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="p-6 border-b border-slate-100">
+          <h1 className="text-xl font-black text-slate-800 flex items-center gap-3">
+            <div className="bg-emerald-600 p-2 rounded-lg text-white">
+              <Calculator size={24} />
+            </div>
+            دفتر حسابات المحطة
+          </h1>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto p-4 space-y-8">
+          {/* Current Period Section */}
+          <div>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <LayoutDashboard size={14} />
+              الفترة الحالية
+            </h3>
+            <div className="space-y-2">
+              <button 
+                onClick={() => {
+                  setSelectedPeriod(null);
+                  setViewingArchive(null);
+                  setView('ledger');
+                  setIsMobileMenuOpen(false);
+                  scrollToLedger();
+                }}
+                className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${(!selectedPeriod && !viewingArchive && view === 'ledger') ? 'bg-emerald-50 text-emerald-700 border border-emerald-100 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <FileText size={18} />
+                  <span className="font-bold">دفتر الحركات</span>
+                </div>
+              </button>
+              <button 
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  scrollToSummary();
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-xl transition-all text-slate-600 hover:bg-slate-50"
+              >
+                <div className="flex items-center gap-3">
+                  <Calculator size={18} />
+                  <span className="font-bold">الملخص</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+            {/* Archive Section */}
+            <div>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                <Archive size={14} />
+                الأرشيف والتقارير
+              </h3>
+              <div className="space-y-2">
+                <button 
+                  onClick={() => {
+                    setView('archive-list');
+                    setViewingArchive(null);
+                    setSelectedPeriod(null);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${view === 'archive-list' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Archive size={18} />
+                    <span className="font-bold">الأرشيف</span>
+                  </div>
+                </button>
+                <button 
+                  onClick={() => {
+                    setView('reports');
+                    setViewingArchive(null);
+                    setSelectedPeriod(null);
+                    setIsMobileMenuOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${view === 'reports' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100 shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <BarChart3 size={18} />
+                    <span className="font-bold">التقارير</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+        </nav>
+
+        <div className="p-4 border-t border-slate-100 bg-slate-50/50">
+          <div className="flex flex-col gap-2">
+            <span className="text-[10px] text-slate-400 font-bold uppercase text-center">الرصيد الإجمالي</span>
+            <div className={`text-lg font-black font-mono text-center py-2 rounded-lg border-2 ${
+              (viewingArchive ? viewingArchive.totals.finalBalance : (entriesWithBalance.length > 0 ? entriesWithBalance[entriesWithBalance.length - 1].balance : openingBalance)) >= 0 
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                : 'bg-rose-50 text-rose-700 border-rose-200'
+            }`}>
+              {(viewingArchive ? viewingArchive.totals.finalBalance : (entriesWithBalance.length > 0 ? entriesWithBalance[entriesWithBalance.length - 1].balance : openingBalance)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </div>
+
+            <button
+              onClick={handleLogout}
+              className="mt-2 w-full flex items-center justify-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-xl hover:bg-slate-50 transition-colors shadow-sm font-bold text-sm"
+            >
+              <LogOut size={16} />
+              تسجيل الخروج
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="flex-1 min-h-screen overflow-y-auto w-full">
+        {view === 'archive-list' ? (
+          <ArchiveListPage
+            archiveList={archiveList}
+            archiveSearch={archiveSearch}
+            archiveFromDate={archiveFromDate}
+            archiveToDate={archiveToDate}
+            archiveMinTransactions={archiveMinTransactions}
+            archiveSortField={archiveSortField}
+            archiveSortDirection={archiveSortDirection}
+            archivePage={archivePage}
+            archiveRowsPerPage={archiveRowsPerPage}
+            isCreatingNew={isCreatingNew}
+            onSearchChange={setArchiveSearch}
+            onFromDateChange={setArchiveFromDate}
+            onToDateChange={setArchiveToDate}
+            onMinTransactionsChange={setArchiveMinTransactions}
+            onSortFieldChange={setArchiveSortField}
+            onSortDirectionChange={setArchiveSortDirection}
+            onPageChange={setArchivePage}
+            onRowsPerPageChange={setArchiveRowsPerPage}
+            onResetFilters={() => {
+              setArchiveSearch('');
+              setArchiveFromDate('');
+              setArchiveToDate('');
+              setArchiveMinTransactions('');
+              setArchiveSortField('date');
+              setArchiveSortDirection('asc');
+              setArchivePage(1);
+            }}
+            onCreateNewPeriod={handleCreateNewPeriod}
+            onOpenPeriod={(period) => {
+              setViewingArchive(period.fullData);
+              setView('ledger');
+            }}
+            onPrint={handlePrint}
+          />
+        ) : view === 'reports' ? (
+          <ReportsPage
+            reportFromDate={reportFromDate}
+            reportToDate={reportToDate}
+            isCompareEnabled={isCompareEnabled}
+            compareFromDate={compareFromDate}
+            compareToDate={compareToDate}
+            reportRows={reportRows}
+            reportSummary={reportSummary}
+            compareRows={compareRows}
+            compareSummary={compareSummary}
+            comparisonDelta={comparisonDelta}
+            onFromDateChange={setReportFromDate}
+            onToDateChange={setReportToDate}
+            onCompareToggle={() => setIsCompareEnabled(prev => !prev)}
+            onCompareFromDateChange={setCompareFromDate}
+            onCompareToDateChange={setCompareToDate}
+            onApplyFlexibleRange={applyFlexibleReportRange}
+            onCreateNewPeriod={handleCreateNewPeriod}
+            onPrint={handlePrint}
+          />
+        ) : (
+          <>
+            <div className="hidden" aria-hidden="true">
+              <span data-print-period-start>
+                {viewingArchive
+                  ? (viewingArchive.startDate || '')
+                  : (selectedPeriod
+                    ? (periods.find(p => p.key === selectedPeriod)?.startDate || '')
+                    : (currentPeriodDates[0] || ''))}
+              </span>
+              <span data-print-period-end>
+                {viewingArchive
+                  ? (viewingArchive.endDate || '')
+                  : (selectedPeriod
+                    ? (periods.find(p => p.key === selectedPeriod)?.endDate || '')
+                    : (currentPeriodDates[currentPeriodDates.length - 1] || ''))}
+              </span>
+            </div>
+
+            {/* Header */}
+            <header className="bg-white border-b border-slate-200 p-3 sm:p-4 md:p-6 sticky top-0 z-20 print:hidden">
+              <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                <div className="flex items-start sm:items-center gap-3 sm:gap-4 w-full sm:w-auto">
+                  {(selectedPeriod || viewingArchive) && (
+                    <button 
+                      onClick={() => {
+                        setView('archive-list');
+                        setViewingArchive(null);
+                      }}
+                      className="p-2 hover:bg-slate-100 rounded-full text-slate-400 hover:text-emerald-600 transition-colors"
+                      title="الرجوع للأرشيف"
+                    >
+                      <ChevronRight size={24} />
+                    </button>
+                  )}
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-black text-slate-800">
+                      {viewingArchive ? `أرشيف: ${viewingArchive.displayLabel}` : (selectedPeriod ? 'سجلات الأرشيف' : 'الفترة الحالية')}
+                    </h2>
+                    {viewingArchive ? (
+                      <p className="text-rose-600 font-bold flex items-center gap-2 mt-1">
+                        <Archive size={16} />
+                        عرض نسخة مؤرشفة (للقراءة فقط)
+                      </p>
+                    ) : (selectedPeriod ? (
+                      <p className="text-emerald-600 font-bold flex items-center gap-2 mt-1">
+                        <Clock size={16} />
+                        عرض سجلات الفترة: 
+                        <span className="flex items-center gap-2" dir="ltr">
+                          <span style={{ unicodeBidi: 'isolate' }}>{formatDateArabic(periods.find(p => p.key === selectedPeriod)?.startDate || '')}</span>
+                          <span className="text-slate-300">←</span>
+                          <span style={{ unicodeBidi: 'isolate' }}>{formatDateArabic(periods.find(p => p.key === selectedPeriod)?.endDate || '')}</span>
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-slate-500 font-medium flex items-center gap-2 mt-1">
+                        <CalendarIcon size={16} />
+                        كشف حساب دوري
+                      </p>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row w-full sm:w-auto items-stretch sm:items-center gap-2 sm:gap-3">
+                  {!viewingArchive && !selectedPeriod && (
+                    <button
+                      onClick={handleCreateNewPeriod}
+                      disabled={isCreatingNew}
+                      className={`w-full sm:w-auto justify-center flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-xl hover:bg-emerald-700 transition-colors shadow-sm font-bold text-sm ${isCreatingNew ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {isCreatingNew ? (
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      ) : (
+                        <Plus size={16} />
+                      )}
+                      {isCreatingNew ? 'جاري الإنشاء...' : 'إنشاء فترة جديدة'}
+                    </button>
+                  )}
+                  <button 
+                    onClick={handlePrint}
+                    className="w-full sm:w-auto justify-center flex items-center gap-2 bg-white border border-slate-200 px-4 py-2.5 rounded-xl hover:bg-slate-50 transition-colors shadow-sm text-slate-700 font-bold text-sm"
+                  >
+                    <Printer size={18} />
+                    طباعة الكشف
+                  </button>
+                </div>
+              </div>
+            </header>
+
+            <div className="p-3 sm:p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
+              {selectedPeriod && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 sm:p-4 mb-6 sm:mb-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 print:hidden"
+                >
+                  <div className="flex items-center gap-3 text-emerald-800">
+                    <div className="bg-emerald-600 p-2 rounded-lg text-white">
+                      <Archive size={20} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider opacity-70">أنت تشاهد الأرشيف الآن</p>
+                      <div className="font-black flex items-center gap-2" dir="ltr">
+                        <span style={{ unicodeBidi: 'isolate' }}>{formatDateArabic(periods.find(p => p.key === selectedPeriod)?.startDate || '')}</span>
+                        <span className="opacity-50">←</span>
+                        <span style={{ unicodeBidi: 'isolate' }}>{formatDateArabic(periods.find(p => p.key === selectedPeriod)?.endDate || '')}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">
+                    <button 
+                      onClick={() => setView('archive-list')}
+                      className="w-full sm:w-auto bg-white text-slate-700 px-4 py-2.5 rounded-xl font-bold text-sm border border-slate-200 hover:bg-slate-50 transition-colors shadow-sm"
+                    >
+                      رجوع للأرشيف
+                    </button>
+                    <button 
+                      onClick={() => setSelectedPeriod(null)}
+                      className="w-full sm:w-auto bg-emerald-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-emerald-700 transition-colors shadow-sm"
+                    >
+                      رجوع للفترة الحالية
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
+
+          {/* Main Ledger Table */}
+          <div id="ledger-table" className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden mb-8 print:shadow-none print:border-slate-300">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1220px] border-collapse text-right">
+                <thead>
+                  <tr className="bg-slate-100 border-b border-slate-300">
+                    <th className="p-3 text-slate-800 font-black border-l border-slate-300 bg-slate-200 text-center text-lg w-[26%] min-w-[260px]">
+                      تاريخ
+                    </th>
+                    <th colSpan={3} className="p-3 text-emerald-800 font-black border-l border-slate-300 bg-emerald-50 text-center text-lg">
+                      مدين
+                    </th>
+                    <th colSpan={2} className="p-3 text-rose-800 font-black border-l border-slate-300 bg-rose-50 text-center text-lg">
+                      دائن
+                    </th>
+                    <th className="p-3 text-slate-800 font-black bg-slate-200 text-center text-lg">
+                      رصيد
+                    </th>
+                    <th className="p-3 text-slate-800 font-black border-r border-slate-300 bg-slate-200 text-center text-lg min-w-[110px]">
+                      رقم مستند
+                    </th>
+                    <th colSpan={5} className="p-3 text-sky-800 font-black border-r border-slate-300 bg-sky-50 text-center text-lg">
+                      الكميات الواردة
+                    </th>
+                  </tr>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold">
+                    <th className="p-2 text-slate-600 border-l border-slate-200 text-center w-[26%] min-w-[260px]"></th>
+                    <th className="p-2 text-emerald-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">إيداع</th>
+                    <th className="p-2 text-emerald-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">بونات</th>
+                    <th className="p-2 text-emerald-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">مذكرة خطأ</th>
+                    <th className="p-2 text-rose-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">فواتير</th>
+                    <th className="p-2 text-rose-600 border-l border-slate-200 text-center w-[12%] min-w-[132px] whitespace-nowrap">مذكرة خطأ</th>
+                    <th className="p-2 text-slate-600 border-r border-slate-200 text-center w-[15%]"></th>
+                    <th className="p-2 text-slate-600 border-r border-slate-200 text-center min-w-[110px]"></th>
+                    <th className="p-2 text-sky-600 border-r border-slate-200 text-center min-w-[96px]">سولار</th>
+                    <th className="p-2 text-sky-600 border-r border-slate-200 text-center min-w-[84px]">80</th>
+                    <th className="p-2 text-sky-600 border-r border-slate-200 text-center min-w-[84px]">92</th>
+                    <th className="p-2 text-sky-600 border-r-2 border-slate-300 text-center min-w-[84px]">95</th>
+                    <th className="p-2 text-sky-700 text-center min-w-[102px]">مجموع</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <AnimatePresence initial={false}>
+                    {currentViewEntries.map((entry, index) => (
+                      <motion.tr 
+                        key={`${entry.id}-${index}`}
+                        id={`row-${entry.id}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.01 }}
+                        className="border-b border-slate-100 hover:bg-slate-50/50 transition-colors group"
+                      >
+                        {/* Date Column */}
+                        <td className="p-4 border-l border-slate-200 group-hover:bg-slate-50 transition-colors align-middle min-w-[260px]">
+                          <div className="relative flex items-center justify-center group/date gap-3">
+                            {!viewingArchive && (
+                              <button 
+                                onClick={() => deleteEntry(entry.id)}
+                                className="opacity-0 group-hover/date:opacity-100 p-1.5 text-rose-400 hover:text-rose-600 transition-all hover:bg-rose-50 rounded-md print:hidden"
+                                title="حذف اليوم"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            )}
+                            <div className="relative flex-1 max-w-none whitespace-nowrap">
+                              <div className="relative flex items-center justify-center">
+                                <CustomDateInput 
+                                  value={entry.date}
+                                  onChange={(newVal) => updateRowDate(entry.id, newVal)}
+                                  className="border-none bg-transparent"
+                                  disabled={!!viewingArchive}
+                                />
+                                {duplicateMetaByRow[index]?.total > 1 && duplicateMetaByRow[index]?.order > 1 && (
+                                  <span
+                                    dir="ltr"
+                                    className="pointer-events-none absolute -top-2 -start-1 text-[10px] leading-none px-1.5 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-700 font-bold shadow-sm"
+                                    title="ترتيب السجل داخل نفس اليوم"
+                                  >
+                                    #{duplicateMetaByRow[index].order}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Debit Section */}
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-emerald-50/10">
+                          <input 
+                            type="number" 
+                            value={entry.revenue || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'revenue', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-emerald-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-emerald-50/10">
+                          <input 
+                            type="number" 
+                            value={entry.coupons || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'coupons', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-emerald-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-emerald-50/5">
+                          <input 
+                            type="number" 
+                            value={entry.debitNote || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'debitNote', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-emerald-600 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+
+                        {/* Credit Section */}
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-rose-50/10">
+                          <input 
+                            type="number" 
+                            value={entry.invoices || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'invoices', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-rose-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 min-w-[132px] border-l border-slate-200 bg-rose-50/5">
+                          <input 
+                            type="number" 
+                            value={entry.creditNote || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'creditNote', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-rose-600 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+
+                        {/* Balance Column */}
+                        <td className="p-2 text-center font-mono font-black text-slate-700 bg-slate-50/30">
+                          {((Number(entry.revenue) || 0) !== 0 ||
+                            (Number(entry.coupons) || 0) !== 0 ||
+                            (Number(entry.debitNote) || 0) !== 0 ||
+                            (Number(entry.invoices) || 0) !== 0 ||
+                            (Number(entry.creditNote) || 0) !== 0)
+                            ? (Number(entry.rowBalance) || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })
+                            : ""}
+                        </td>
+
+                        <td className="p-2 border-r border-slate-200 bg-slate-50/10">
+                          <input
+                            type="text"
+                            value={entry.documentNumber || ''}
+                            placeholder="-"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'documentNumber', e.target.value)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-slate-700 font-bold ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+
+                        <td className="p-2 border-r border-slate-200 bg-sky-50/15">
+                          <input
+                            type="number"
+                            value={entry.solar || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'solar', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-sky-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 border-r border-slate-200 bg-sky-50/15">
+                          <input
+                            type="number"
+                            value={entry.fuel80 || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'fuel80', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-sky-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 border-r border-slate-200 bg-sky-50/15">
+                          <input
+                            type="number"
+                            value={entry.fuel92 || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'fuel92', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-sky-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 border-r border-slate-200 bg-sky-50/15">
+                          <input
+                            type="number"
+                            value={entry.fuel95 || ''}
+                            placeholder="0"
+                            readOnly={!!viewingArchive}
+                            onChange={(e) => updateEntry(entry.id, 'fuel95', parseFloat(e.target.value) || 0)}
+                            className={`w-full text-center bg-transparent border-none focus:ring-0 text-sky-700 font-bold font-mono ${viewingArchive ? 'cursor-default' : ''}`}
+                          />
+                        </td>
+                        <td className="p-2 text-center font-mono font-black text-sky-800 bg-sky-50/30">
+                          {((Number(entry.solar) || 0) + (Number(entry.fuel80) || 0) + (Number(entry.fuel92) || 0) + (Number(entry.fuel95) || 0))
+                            ? ((Number(entry.solar) || 0) + (Number(entry.fuel80) || 0) + (Number(entry.fuel92) || 0) + (Number(entry.fuel95) || 0)).toLocaleString()
+                            : ''}
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </AnimatePresence>
+                </tbody>
+                <tfoot className="bg-slate-900 text-white font-bold border-t-2 border-slate-700">
+                  <tr>
+                    <td className="p-3 border-l border-slate-700 text-center text-xs uppercase tracking-widest opacity-50">المجموع</td>
+                    <td className="p-3 border-l border-slate-700 text-center font-mono text-emerald-400">
+                      {totals.sumRevenue.toLocaleString()}
+                    </td>
+                    <td className="p-3 border-l border-slate-700 text-center font-mono text-emerald-400">
+                      {totals.sumCoupons.toLocaleString()}
+                    </td>
+                    <td className="p-3 border-l border-slate-700 text-center font-mono text-emerald-300 text-sm">
+                      {totals.sumDebitNote.toLocaleString()}
+                    </td>
+                    <td className="p-3 border-l border-slate-700 text-center font-mono text-rose-400">
+                      {totals.sumInvoices.toLocaleString()}
+                    </td>
+                    <td className="p-3 border-l border-slate-700 text-center font-mono text-rose-300 text-sm">
+                      {totals.sumCreditNote.toLocaleString()}
+                    </td>
+                    <td className="p-3 border-r border-slate-700 text-center font-mono text-lg bg-slate-800">
+                      {totals.finalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="p-3 border-r border-slate-700 text-center text-xs opacity-60">-</td>
+                    <td className="p-3 border-r border-slate-700 text-center font-mono text-sky-300">{quantityTotals.sumSolar.toLocaleString()}</td>
+                    <td className="p-3 border-r border-slate-700 text-center font-mono text-sky-300">{quantityTotals.sum80.toLocaleString()}</td>
+                    <td className="p-3 border-r border-slate-700 text-center font-mono text-sky-300">{quantityTotals.sum92.toLocaleString()}</td>
+                    <td className="p-3 border-r-2 border-slate-500 text-center font-mono text-sky-300">{quantityTotals.sum95.toLocaleString()}</td>
+                    <td className="p-3 text-center font-mono text-sky-200">{quantityTotals.sumTotal.toLocaleString()}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            {/* Add Day & Save Buttons */}
+            {!viewingArchive && (
+              <div className="p-4 sm:p-6 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row flex-wrap justify-center gap-3 sm:gap-4 print:hidden">
+                <button 
+                  onClick={addNewDay}
+                  className="w-full sm:w-auto justify-center flex items-center gap-3 px-6 sm:px-10 py-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-all shadow-lg font-black text-base group active:scale-95"
+                >
+                  <Plus size={22} className="group-hover:rotate-90 transition-transform duration-300" />
+                  إضافة يوم
+                </button>
+
+                <button 
+                  onClick={handleSaveAndArchive}
+                  disabled={isSaving}
+                  className="w-full sm:w-auto justify-center flex items-center gap-3 px-6 sm:px-10 py-3 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all shadow-lg font-black text-base group active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSaving ? (
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Save size={22} className="group-hover:scale-110 transition-transform duration-300" />
+                  )}
+                  حفظ العملية
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Summary Section */}
+          <div id="summary-section" className="mb-12 print:block">
+            {/* Detailed Summary Card */}
+            <div className="w-full bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-6 lg:p-8 print:border-slate-300 print:shadow-none print:mt-8">
+              <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2 border-b border-slate-100 pb-4">
+                <FileText className="text-emerald-600" />
+                ملخص الحساب الختامي
+              </h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
+                {/* Debit Summary */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center text-slate-600">
+                    <span>إجمالي الإيداعات:</span>
+                    <span className="font-mono font-semibold text-emerald-600">{totals.sumRevenue.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-600">
+                    <span>إجمالي البونات:</span>
+                    <span className="font-mono font-semibold text-emerald-600">{totals.sumCoupons.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-600">
+                    <span>إجمالي مذكرة الخطأ (مدين):</span>
+                    <span className="font-mono font-semibold text-emerald-600">{totals.sumDebitNote.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
+                    <span className="font-bold text-slate-800">إجمالي المدين:</span>
+                    <span className="font-mono text-xl font-black text-emerald-700">{totals.totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+
+                {/* Credit Summary */}
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center text-slate-600">
+                    <span>إجمالي الفواتير:</span>
+                    <span className="font-mono font-semibold text-rose-600">{totals.sumInvoices.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-600">
+                    <span>إجمالي مذكرة الخطأ (دائن):</span>
+                    <span className="font-mono font-semibold text-rose-600">{totals.sumCreditNote.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
+                    <span className="font-bold text-slate-800">إجمالي الدائن:</span>
+                    <span className="font-mono text-xl font-black text-rose-700">{totals.totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Final Balance Highlight */}
+              <div className="mt-10 bg-slate-900 text-white rounded-xl p-6 flex flex-col md:flex-row items-center justify-between gap-4 shadow-inner print:bg-white print:text-slate-900 print:border-2 print:border-slate-900">
+                <div className="flex items-center gap-4">
+                  <div className={`p-3 rounded-full ${totals.finalBalance >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'} print:text-slate-900`}>
+                    <Calculator size={32} />
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-sm uppercase tracking-wider font-bold print:text-slate-600">صافي الفرق (الرصيد النهائي)</p>
+                    <h3 className="text-3xl font-black font-mono">
+                      {totals.finalBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </h3>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className={`px-4 py-1 rounded-full text-xs font-bold uppercase ${totals.finalBalance >= 0 ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'} print:border print:border-slate-900 print:text-slate-900`}>
+                    {totals.finalBalance >= 0 ? 'فائض / رصيد إيجابي' : 'عجز / رصيد سلبي'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    )}
+  </div>
+
+      {/* Global CSS for Print */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          @page { size: A4 landscape; margin: 10mm; }
+
+          body {
+            background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          /* Hide non-essential layout blocks in print */
+          .app-root > * {
+            display: none !important;
+          }
+
+          /* Keep only main content area */
+          .app-root > .flex-1 {
+            display: block !important;
+            width: 100% !important;
+            min-height: auto !important;
+            overflow: visible !important;
+          }
+
+          /* Print only accounting period table + summary */
+          #ledger-table,
+          #summary-section,
+          #reports-table {
+            display: block !important;
+          }
+
+          #reports-controls,
+          #reports-manual-range,
+          #reports-table button,
+          #reports-table input,
+          #reports-table [role="button"] {
+            display: none !important;
+          }
+
+          #reports-table,
+          #ledger-table {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+
+          #ledger-table {
+            margin-bottom: 10mm !important;
+            border-radius: 0 !important;
+          }
+
+          #reports-table {
+            margin-bottom: 10mm !important;
+            border-radius: 0 !important;
+          }
+
+          #ledger-table table,
+          #reports-table table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            table-layout: fixed !important;
+            font-size: 10px !important;
+          }
+
+          #ledger-table thead,
+          #reports-table thead {
+            display: table-header-group;
+          }
+
+          #ledger-table tfoot,
+          #reports-table tfoot {
+            display: table-footer-group;
+          }
+
+          #ledger-table tr,
+          #reports-table tr,
+          #summary-section .bg-white {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+
+          #ledger-table th, #ledger-table td,
+          #reports-table th, #reports-table td {
+            border: 1px solid #cbd5e1 !important;
+            padding: 4px 6px !important;
+            vertical-align: middle !important;
+            word-break: break-word !important;
+          }
+
+          #reports-table .overflow-x-auto,
+          #ledger-table .overflow-x-auto {
+            overflow: visible !important;
+            max-width: none !important;
+          }
+
+          #reports-table table {
+            min-width: 0 !important;
+          }
+
+          #ledger-table table {
+            min-width: 0 !important;
+          }
+
+          #reports-table th:nth-child(1), #reports-table td:nth-child(1) { width: 34% !important; }
+          #reports-table th:nth-child(2), #reports-table td:nth-child(2) { width: 22% !important; }
+          #reports-table th:nth-child(3), #reports-table td:nth-child(3) { width: 22% !important; }
+          #reports-table th:nth-child(4), #reports-table td:nth-child(4) { width: 22% !important; }
+
+          #ledger-table th,
+          #ledger-table td {
+            font-size: 9px !important;
+          }
+
+          input {
+            border: none !important;
+            outline: none !important;
+            background: transparent !important;
+            color: #111827 !important;
+          }
+
+          input::-webkit-outer-spin-button,
+          input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+          .no-print { display: none !important; }
+        }
+      `}} />
+    </div>
+  );
+}

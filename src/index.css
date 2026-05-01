@@ -1,1 +1,15 @@
 @import "tailwindcss";
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+  direction: rtl;
+  text-align: right;
+}
+
+#root {
+  font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+}
